@@ -5,13 +5,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from minince.config import settings
+from minince.infrastructure.database.connection import Base, engine
 from minince.logging import setup_logging
-from minince.web.routers.pages import router as pages_router
 from minince.web.routers.api import router as api_router
 from minince.web.routers.devices import router as devices_router
+from minince.web.routers.pages import router as pages_router
 from minince.web.routers.tasks import router as tasks_router
 from minince.web.routers.templates import router as templates_router
-from minince.infrastructure.database.connection import engine, Base
 
 
 def create_app() -> FastAPI:

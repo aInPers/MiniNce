@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, JSON, String
+from sqlalchemy import JSON, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from minince.infrastructure.database.connection import Base
@@ -86,6 +86,19 @@ class ConfigTemplate(Base, TimestampMixin):
     template_content: Mapped[str] = mapped_column(String, nullable=False)
     variable_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=True)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+
+
+class ConfigBackup(Base, TimestampMixin):
+    __tablename__ = "config_backups"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    device_id: Mapped[int] = mapped_column(nullable=False, index=True)
+    backup_type: Mapped[str] = mapped_column(String(50), default="MANUAL", nullable=False)
+    config_content: Mapped[str] = mapped_column(String, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=True)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(100), default="system", nullable=False)
+    restore_from_id: Mapped[int | None] = mapped_column(nullable=True)
 
 
 class AuditLog(Base):

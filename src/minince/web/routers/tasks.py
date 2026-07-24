@@ -14,7 +14,12 @@ from minince.infrastructure.repositories.audit_repository import AuditLogReposit
 from minince.infrastructure.repositories.device_repository import DeviceRepository
 from minince.infrastructure.repositories.task_repository import TaskRepository
 from minince.infrastructure.security.encryption import EncryptionManager
-from minince.shared.exceptions import DeviceNotFoundError, TaskExecutionError, TaskNotFoundError, ValidationError
+from minince.shared.exceptions import (
+    DeviceNotFoundError,
+    TaskExecutionError,
+    TaskNotFoundError,
+    ValidationError,
+)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -246,7 +251,7 @@ async def task_execute(
         return RedirectResponse(url=f"/tasks/{task_id}", status_code=303)
     except TaskNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except TaskExecutionError as e:
+    except TaskExecutionError:
         return RedirectResponse(url=f"/tasks/{task_id}", status_code=303)
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))

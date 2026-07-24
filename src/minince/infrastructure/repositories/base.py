@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, TypeVar
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select
 from sqlalchemy.orm import Session
 
 from minince.shared.exceptions import RepositoryError

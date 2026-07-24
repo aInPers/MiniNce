@@ -1,10 +1,10 @@
-from minince.domain.network.intents import InterfaceIntent, VlanIntent
 from minince.domain.network.config_plan import (
     ConfigPlan,
     ConfigStep,
     ExecutionResult,
     VerificationResult,
 )
+from minince.domain.network.intents import InterfaceIntent, VlanIntent
 
 __all__ = [
     "VlanIntent",

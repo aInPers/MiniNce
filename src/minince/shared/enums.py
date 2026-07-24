@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     DRAFT = "DRAFT"
     VALIDATING = "VALIDATING"
     READY = "READY"
@@ -28,7 +28,7 @@ class TaskStatus(str, Enum):
         )
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(StrEnum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -49,14 +49,14 @@ class RiskLevel(str, Enum):
         return order[self]
 
 
-class DeviceStatus(str, Enum):
+class DeviceStatus(StrEnum):
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"
     ERROR = "ERROR"
     MAINTENANCE = "MAINTENANCE"
 
 
-class DeviceVendor(str, Enum):
+class DeviceVendor(StrEnum):
     HUAWEI = "HUAWEI"
     CISCO = "CISCO"
     H3C = "H3C"
@@ -64,13 +64,13 @@ class DeviceVendor(str, Enum):
     GENERIC = "GENERIC"
 
 
-class ConnectionType(str, Enum):
+class ConnectionType(StrEnum):
     SSH = "SSH"
     TELNET = "TELNET"
     CONSOLE = "CONSOLE"
 
 
-class TaskType(str, Enum):
+class TaskType(StrEnum):
     VLAN_CREATE = "VLAN_CREATE"
     VLAN_UPDATE = "VLAN_UPDATE"
     VLAN_DELETE = "VLAN_DELETE"
@@ -79,7 +79,7 @@ class TaskType(str, Enum):
     CUSTOM = "CUSTOM"
 
 
-class StepStatus(str, Enum):
+class StepStatus(StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"

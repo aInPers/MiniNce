@@ -137,7 +137,7 @@ class HuaweiVRPCommandGenerator:
             steps.append(ConfigStep(
                 name="set_vlan_description",
                 command=desc_cmd,
-                description=f"Set VLAN description",
+                description="Set VLAN description",
             ))
 
         commands.append("quit")
@@ -252,7 +252,7 @@ class HuaweiVRPCommandGenerator:
             steps.append(ConfigStep(
                 name="set_description",
                 command=desc_cmd,
-                description=f"Set interface description",
+                description="Set interface description",
             ))
 
         cur_admin_up = current_data.get("admin_up")

@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from minince.shared.exceptions import MiniNCEError
 
-T = TypeVar("T")
-
 
 @dataclass
-class Result(Generic[T]):
+class Result:
     success: bool
-    data: T | None = None
+    data: Any = None
     error: MiniNCEError | None = None
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def ok(cls, data: T, warnings: list[str] | None = None, **metadata: Any) -> Result[T]:
+    def ok(cls, data: Any = None, warnings: list[str] | None = None, **metadata: Any) -> Result:
         return cls(
             success=True,
             data=data,
@@ -26,7 +24,7 @@ class Result(Generic[T]):
         )
 
     @classmethod
-    def fail(cls, error: MiniNCEError, **metadata: Any) -> Result[T]:
+    def fail(cls, error: MiniNCEError, **metadata: Any) -> Result:
         return cls(
             success=False,
             error=error,
@@ -37,17 +35,17 @@ class Result(Generic[T]):
     def is_failure(self) -> bool:
         return not self.success
 
-    def unwrap(self) -> T:
+    def unwrap(self) -> Any:
         if not self.success or self.data is None:
             raise self.error or MiniNCEError("Cannot unwrap failed result")
         return self.data
 
-    def map(self, func: Any) -> Result[Any]:
+    def map(self, func: Any) -> Result:
         if self.success and self.data is not None:
             return Result.ok(func(self.data), self.warnings, **self.metadata)
         return self
 
-    def and_then(self, func: Any) -> Result[Any]:
+    def and_then(self, func: Any) -> Result:
         if self.success and self.data is not None:
             return func(self.data)
         return self
@@ -66,12 +64,12 @@ class Result(Generic[T]):
 
 
 @dataclass
-class PageResult(Generic[T]):
-    items: list[T]
+class PageResult:
+    items: list[Any]
     total: int
-    page: int
-    page_size: int
-    total_pages: int
+    page: int = 1
+    page_size: int = 20
+    total_pages: int = 1
 
     @property
     def has_next(self) -> bool:
