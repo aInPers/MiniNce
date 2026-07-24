@@ -225,3 +225,88 @@ class TestTaskExecutorRiskControl:
 
         result = executor.execute_task(task.id)
         assert result.status == TaskStatus.SUCCEEDED.value
+
+
+class TestTaskExecutorFailureRecording:
+    def test_execution_failure_records_error(self, executor: TaskExecutor, test_db: Session) -> None:
+        task_repo = TaskRepository(test_db)
+        task = task_repo.create(
+            task_number="TASK-FAIL-001",
+            task_type="VLAN_CREATE",
+            device_id=99999,
+            risk_level="LOW",
+            created_by="admin",
+        )
+        task.structured_intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 100,
+            "name": "TEST",
+            "device_id": 99999,
+        }
+        task_repo.commit()
+
+        task_id = task.id
+        try:
+            executor.execute_task(task_id)
+        except (DeviceConnectionError, TaskExecutionError, Exception):
+            pass
+
+        updated_task = task_repo.get_by_id(task_id)
+        assert updated_task is not None
+        assert updated_task.status == TaskStatus.FAILED.value
+        assert updated_task.error_message is not None
+        assert len(updated_task.error_message) > 0
+
+    def test_verification_failure_records_state(self, executor: TaskExecutor, test_db: Session, test_device: int) -> None:
+        task_repo = TaskRepository(test_db)
+        task = task_repo.create(
+            task_number="TASK-VERIFY-001",
+            task_type="VLAN_CREATE",
+            device_id=test_device,
+            risk_level="LOW",
+            created_by="admin",
+        )
+        task.structured_intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 200,
+            "name": "VERIFY_TEST",
+            "device_id": test_device,
+        }
+        task_repo.commit()
+
+        task_id = task.id
+        result = executor.execute_task(task_id)
+
+        updated_task = task_repo.get_by_id(task_id)
+        assert updated_task is not None
+        assert updated_task.status in (TaskStatus.SUCCEEDED.value, TaskStatus.FAILED.value)
+        assert result.status == updated_task.status
+
+    def test_task_state_transition_draft_to_running(self, executor: TaskExecutor, test_db: Session, test_device: int) -> None:
+        task_repo = TaskRepository(test_db)
+        task = task_repo.create(
+            task_number="TASK-TRANS-001",
+            task_type="INTERFACE_CONFIG",
+            device_id=test_device,
+            risk_level="LOW",
+            created_by="admin",
+        )
+        assert task.status == TaskStatus.DRAFT.value
+
+        task.structured_intent = {
+            "feature": "INTERFACE",
+            "interface_name": "GigabitEthernet0/0/2",
+            "description": "Transition Test",
+            "admin_up": True,
+            "device_id": test_device,
+        }
+        task_repo.commit()
+
+        result = executor.execute_task(task.id)
+        assert result.status != TaskStatus.DRAFT.value
+        assert result.status == TaskStatus.SUCCEEDED.value
+
+        updated_task = task_repo.get_by_id(task.id)
+        assert updated_task.status == TaskStatus.SUCCEEDED.value

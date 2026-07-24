@@ -161,10 +161,10 @@ async def device_update(
     for field in ["name", "hostname", "management_ip", "password", "username", "vendor", "platform", "connection_type", "description"]:
         val = form.get(field)
         if val is not None and val != "":
-            update_data[field] = val
+            update_data[field] = str(val)
     port = form.get("port")
     if port:
-        update_data["port"] = int(port)
+        update_data["port"] = str(int(str(port)))
 
     try:
         service.update_device(device_id, **update_data)

@@ -96,13 +96,13 @@ async def backup_create(
 
     service = BackupService(db)
     try:
-        result = service.create_backup(
+        service.create_backup(
             device_id=device_id,
             created_by=created_by,
         )
         return RedirectResponse(url="/backups?message=备份创建成功", status_code=303)
     except Exception as e:
-        return RedirectResponse(url=f"/backups?error={str(e)}", status_code=303)
+        return RedirectResponse(url="/backups?error=" + str(e), status_code=303)
 
 
 @router.post("/{backup_id}/restore", response_class=HTMLResponse, response_model=None)
@@ -115,16 +115,16 @@ async def backup_restore(
     confirmed = form.get("confirmed") == "true"
 
     if not confirmed:
-        return RedirectResponse(url=f"/backups?error=需要确认才能恢复备份", status_code=303)
+        return RedirectResponse(url="/backups?error=需要确认才能恢复备份", status_code=303)
 
     from minince.application.services.backup_service import BackupService
 
     service = BackupService(db)
     try:
-        result = service.restore_backup(backup_id, confirmed=confirmed)
+        service.restore_backup(backup_id, confirmed=confirmed)
         return RedirectResponse(url="/backups?message=备份恢复命令已生成", status_code=303)
     except Exception as e:
-        return RedirectResponse(url=f"/backups?error={str(e)}", status_code=303)
+        return RedirectResponse(url="/backups?error=" + str(e), status_code=303)
 
 
 @router.post("/{backup_id}/delete", response_class=HTMLResponse, response_model=None)

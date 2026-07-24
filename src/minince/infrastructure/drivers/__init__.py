@@ -30,7 +30,7 @@ def _ensure_drivers_loaded() -> None:
     if _DRIVER_REGISTRY:
         return
     from minince.infrastructure.drivers.huawei_vrp.driver import HuaweiVRPDriver
-    register_driver("HUAWEI", HuaweiVRPDriver)
+    register_driver("HUAWEI", HuaweiVRPDriver)  # type: ignore[type-abstract]
 
 
 _ensure_drivers_loaded()

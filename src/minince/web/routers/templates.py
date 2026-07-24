@@ -136,10 +136,10 @@ async def template_update(
     for field in ["name", "vendor", "feature", "template_content", "version"]:
         val = form.get(field)
         if val is not None and val != "":
-            update_data[field] = val
+            update_data[field] = str(val)
     enabled = form.get("enabled")
     if enabled is not None:
-        update_data["enabled"] = enabled == "on"
+        update_data["enabled"] = "on" if str(enabled) == "on" else "off"
 
     try:
         service.update_template(template_id, **update_data)

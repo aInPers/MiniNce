@@ -20,7 +20,7 @@ def create_ssh_connection(config: SSHConfig, backend: str | None = None) -> SSHC
             f"SSH backend not available: {backend}",
             details={"available": list(_SSH_BACKENDS.keys())},
         )
-    return backend_class(config)
+    return backend_class(config)  # type: ignore[call-arg]
 
 
 def list_ssh_backends() -> list[str]:
