@@ -4,7 +4,7 @@ MiniNCE 是一个部署在内网环境中的轻量级网络自动化管理平台
 
 ## 功能特性
 
-### 第一阶段已实现
+### 第一阶段 - 基础架构 (v0.1.0)
 - ✅ FastAPI Web 应用框架
 - ✅ SQLite 数据库持久化
 - ✅ SQLAlchemy ORM 模型
@@ -20,14 +20,35 @@ MiniNCE 是一个部署在内网环境中的轻量级网络自动化管理平台
 - ✅ 系统首页仪表盘
 - ✅ RESTful API
 
-### 待实现
-- 🔄 SSH 设备连接
-- 🔄 VLAN 配置管理
-- 🔄 接口配置管理
-- 🔄 配置模板引擎
-- 🔄 任务执行器
-- 🔄 配置预览
-- 🔄 华为 VRP 驱动
+### 第二阶段 - 核心业务 (v0.2.0)
+- ✅ 华为 VRP 设备驱动
+- ✅ VLAN 配置管理 (创建、修改、删除)
+- ✅ 接口基础配置 (Access/Trunk/Hybrid)
+- ✅ 接口加入 VLAN
+- ✅ 配置模板管理 CRUD
+- ✅ 配置预览与差异计算
+- ✅ 任务执行器 (完整生命周期)
+- ✅ 任务执行日志记录
+- ✅ 执行结果验证
+- ✅ Web 管理界面 (设备、任务、模板页面)
+
+### 第三阶段 - 扩展功能 (v0.3.0)
+- ✅ SSH 连接抽象层 (Protocol 接口)
+- ✅ Mock SSH 后端 (用于测试)
+- ✅ Paramiko SSH 后端 (生产环境)
+- ✅ Netmiko SSH 后端 (生产环境)
+- ✅ 配置备份服务
+- ✅ 配置恢复功能
+- ✅ 模板变量渲染引擎
+- ✅ 变量白名单安全校验
+- ✅ 配置备份管理 Web UI
+
+### 待实现功能
+- 🔄 真实 SSH 设备对接
+- 🔄 配置回滚流程完善
+- 🔄 批量任务调度
+- 🔄 更多厂商驱动 (Cisco/H3C)
+- 🔄 Alembic 迁移脚本初始化
 
 ## 技术栈
 
@@ -94,6 +115,10 @@ py -m minince.main
 ### 6. 访问应用
 
 - 首页: http://localhost:8000/
+- 设备管理: http://localhost:8000/devices
+- 任务管理: http://localhost:8000/tasks
+- 配置模板: http://localhost:8000/templates
+- 配置备份: http://localhost:8000/backups
 - 健康检查: http://localhost:8000/health
 - API 统计: http://localhost:8000/api/v1/stats
 - API 文档: http://localhost:8000/docs
@@ -116,15 +141,33 @@ src/minince/
 │   └── network/         # 网络配置意图
 ├── application/         # 应用层
 │   ├── services/        # 业务服务
+│   │   ├── device_service.py
+│   │   ├── task_service.py
+│   │   ├── task_executor.py
+│   │   ├── template_service.py
+│   │   ├── template_renderer.py
+│   │   └── backup_service.py
 │   └── dto/             # 数据传输对象
 ├── infrastructure/      # 基础设施层
 │   ├── database/        # 数据库配置和模型
+│   ├── drivers/         # 设备驱动
+│   │   └── huawei_vrp/  # 华为 VRP 驱动
 │   ├── repositories/    # 仓储实现
-│   └── security/        # 安全加密
+│   ├── security/        # 安全加密
+│   └── ssh/             # SSH 连接层
+│       ├── base.py      # SSH 协议接口
+│       ├── mock_connection.py    # Mock 实现
+│       ├── paramiko_connection.py # Paramiko 实现
+│       └── netmiko_connection.py  # Netmiko 实现
 └── web/                 # Web 层
     ├── routers/         # 路由定义
+    │   ├── pages.py     # 首页/健康检查
+    │   ├── api.py       # RESTful API
+    │   ├── devices.py   # 设备管理页面
+    │   ├── tasks.py     # 任务管理页面
+    │   ├── templates.py # 模板管理页面
+    │   └── backups.py   # 备份管理页面
     ├── templates/       # Jinja2 模板
-    ├── static/          # 静态文件
     └── dependencies.py  # 依赖注入
 ```
 
@@ -179,6 +222,26 @@ print(key.decode())
 ```
 
 将生成的密钥配置到 `.env` 文件的 `ENCRYPTION_KEY` 中。
+
+## 版本历史
+
+### v0.3.0 (当前)
+- 添加 SSH 连接抽象层（Protocol 接口）
+- 实现 Mock/Paramiko/Netmiko SSH 后端
+- 实现配置备份服务
+- 实现模板变量渲染引擎
+- 添加配置备份管理 Web UI
+
+### v0.2.0
+- 实现华为 VRP 设备驱动
+- 实现 VLAN 和接口配置管理
+- 实现任务执行器和完整生命周期
+- 添加 Web 管理界面
+
+### v0.1.0
+- 初始化项目骨架
+- 配置 FastAPI、SQLAlchemy、Jinja2
+- 实现基础 CRUD 和状态机
 
 ## 许可证
 

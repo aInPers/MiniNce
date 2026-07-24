@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}配置备份 - MiniNCE{% endblock %}
+{% block content %}
+
+<div class="card">
+    <div class="card-header">
+        <h2>配置备份管理</h2>
+        <div class="btn-group">
+            <a href="/backups?refresh=1" class="btn btn-secondary btn-sm">刷新</a>
+        </div>
+    </div>
+
+    {% if message %}
+    <div class="success-message">{{ message }}</div>
+    {% endif %}
+
+    {% if error %}
+    <div class="error-message">{{ error }}</div>
+    {% endif %}
+
+    <div class="form-group" style="max-width:400px;margin-bottom:24px">
+        <label for="filter_device">按设备筛选</label>
+        <select id="filter_device" onchange="window.location.href='/backups?device_id=' + this.value">
+            <option value="">全部设备</option>
+            {% for d in devices %}
+            <option value="{{ d.id }}" {% if selected_device_id == d.id %}selected{% endif %}>{{ d.name }} ({{ d.management_ip }})</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    {% if backups %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>设备</th>
+                <th>备份类型</th>
+                <th>配置大小</th>
+                <th>校验和</th>
+                <th>创建时间</th>
+                <th>创建者</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for b in backups %}
+            <tr>
+                <td>{{ b.id }}</td>
+                <td>{{ b.device_name }}</td>
+                <td>
+                    {% if b.backup_type == 'MANUAL' %}
+                        <span class="status-badge status-ACTIVE">手动</span>
+                    {% elif b.backup_type == 'AUTO' %}
+                        <span class="status-badge status-READY">自动</span>
+                    {% else %}
+                        <span class="status-badge status-VALIDATING">{{ b.backup_type }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ b.config_size }} 字节</td>
+                <td style="font-family:monospace;font-size:12px">{{ b.checksum[:16] if b.checksum else '-' }}...</td>
+                <td>{{ b.created_at }}</td>
+                <td>{{ b.created_by }}</td>
+                <td>
+                    <div class="btn-group">
+                        <form method="post" action="/backups/{{ b.id }}/restore" style="display:inline" 
+                              onsubmit="return confirm('确定要恢复此备份?\\n\\n这将使用此备份恢复设备配置，\\n可能会覆盖当前配置!')">
+                            <input type="hidden" name="confirmed" value="true">
+                            <button type="submit" class="btn btn-sm btn-secondary">恢复</button>
+                        </form>
+                        <form method="post" action="/backups/{{ b.id }}/delete" style="display:inline" 
+                              onsubmit="return confirm('确定要删除此备份?')">
+                            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div style="margin-top:16px;font-size:13px;color:#718096">
+        共 {{ total }} 条记录
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">💾</div>
+        <p>暂无配置备份</p>
+        <p style="margin-top:8px;font-size:13px">创建设备备份以保护配置安全</p>
+    </div>
+    {% endif %}
+</div>
+
+{% if devices %}
+<div class="card">
+    <div class="card-header">
+        <h2>快速备份</h2>
+    </div>
+    <div class="grid-3">
+        {% for d in devices %}
+        <div class="info-box" style="margin-bottom:16px">
+            <div class="info-label">设备</div>
+            <div class="info-value">{{ d.name }}</div>
+            <div style="font-size:13px;color:#718096;margin:8px 0">
+                {{ d.management_ip }} | {{ d.vendor }}
+            </div>
+            <form method="post" action="/backups/create" onsubmit="return confirm('确定要创建此设备的备份?')">
+                <input type="hidden" name="device_id" value="{{ d.id }}">
+                <button type="submit" class="btn btn-primary btn-sm" style="width:100%">立即备份</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

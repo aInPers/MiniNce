@@ -84,6 +84,18 @@ class BackupRepository:
             file_path=None,
         )
 
+    def get_all(self, limit: int = 100, offset: int = 0) -> list[ConfigBackup]:
+        return (
+            self._db.query(ConfigBackup)
+            .order_by(ConfigBackup.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+            .all()
+        )
+
+    def count_all(self) -> int:
+        return self._db.query(ConfigBackup).count()
+
     def count_by_device(self, device_id: int) -> int:
         return (
             self._db.query(ConfigBackup)
