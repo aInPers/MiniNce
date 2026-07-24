@@ -16,6 +16,7 @@ from minince.infrastructure.repositories.task_repository import TaskRepository
 from minince.infrastructure.security.encryption import EncryptionManager
 from minince.shared.exceptions import (
     DeviceNotFoundError,
+    RiskBlockedError,
     TaskExecutionError,
     TaskNotFoundError,
     ValidationError,
@@ -196,6 +197,8 @@ async def task_create_interface(
 async def task_detail(
     task_id: int,
     request: Request,
+    error: str | None = None,
+    message: str | None = None,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     service = _create_task_service(db)
@@ -207,6 +210,8 @@ async def task_detail(
             request=request,
             task=task,
             steps=steps,
+            error=error,
+            message=message,
             active_page="tasks",
         )
         return HTMLResponse(content=html)
@@ -243,16 +248,22 @@ async def task_preview(
 @router.post("/{task_id}/execute", response_class=HTMLResponse, response_model=None)
 async def task_execute(
     task_id: int,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    form = await request.form()
+    confirmed = form.get("confirmed") == "true"
     executor = _create_task_executor(db)
     try:
-        executor.execute_task(task_id)
+        executor.execute_task(task_id, confirmed=confirmed)
         return RedirectResponse(url=f"/tasks/{task_id}", status_code=303)
     except TaskNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except TaskExecutionError:
-        return RedirectResponse(url=f"/tasks/{task_id}", status_code=303)
+    except (TaskExecutionError, RiskBlockedError) as e:
+        return RedirectResponse(
+            url=f"/tasks/{task_id}?error={str(e)}",
+            status_code=303,
+        )
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

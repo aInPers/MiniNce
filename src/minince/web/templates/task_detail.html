@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block title %}任务详情 - {{ task.task_number }} - MiniNCE{% endblock %}
 {% block content %}
+{% if error %}
+<div class="alert alert-error">
+    <strong>错误:</strong> {{ error }}
+</div>
+{% endif %}
+{% if message %}
+<div class="alert alert-success">
+    <strong>提示:</strong> {{ message }}
+</div>
+{% endif %}
 <div class="card">
     <div class="card-header">
         <h2>{{ task.task_number }}</h2>
@@ -8,8 +18,9 @@
             <form method="post" action="/tasks/{{ task.id }}/preview">
                 <button type="submit" class="btn btn-secondary">生成预览</button>
             </form>
-            {% if task.status == 'DRAFT' or task.status == 'READY' %}
-            <form method="post" action="/tasks/{{ task.id }}/execute" onsubmit="return confirm('确定执行该任务?高风险操作将直接下发到设备!')">
+            {% if task.status == 'DRAFT' or task.status == 'READY' or task.status == 'FAILED' %}
+            <form method="post" action="/tasks/{{ task.id }}/execute" onsubmit="return confirmExecution(this)">
+                <input type="hidden" name="confirmed" value="true">
                 <button type="submit" class="btn btn-primary">执行任务</button>
             </form>
             {% endif %}
@@ -144,4 +155,13 @@
     </div>
     {% endif %}
 </div>
+<script>
+function confirmExecution(form) {
+    var riskLevel = "{{ task.risk_level }}";
+    if (riskLevel === 'HIGH') {
+        return confirm('确定执行该高风险任务?\n\n此操作将直接下发配置到设备，请确认操作无误!');
+    }
+    return confirm('确定执行该任务?');
+}
+</script>
 {% endblock %}

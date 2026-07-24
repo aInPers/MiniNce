@@ -36,7 +36,7 @@ class TaskExecutor:
         self._audit_repo = audit_repo
         self._encryption = encryption or EncryptionManager()
 
-    def execute_task(self, task_id: int, force: bool = False) -> Any:
+    def execute_task(self, task_id: int, force: bool = False, confirmed: bool = False) -> Any:
         task = self._task_repo.get_by_id(task_id)
         if task is None:
             raise TaskNotFoundError(task_id)
@@ -49,7 +49,7 @@ class TaskExecutor:
                     expected_state=TaskStatus.DRAFT.value,
                 )
 
-        self._validate_risk(task)
+        self._validate_risk(task, confirmed=confirmed)
 
         try:
             self._transition(task_id, TaskStatus.VALIDATING.value)
@@ -217,9 +217,9 @@ class TaskExecutor:
 
         return plan
 
-    def _validate_risk(self, task: Any) -> None:
+    def _validate_risk(self, task: Any, confirmed: bool = False) -> None:
         risk = RiskLevel(task.risk_level)
-        if risk.requires_confirmation and not task.created_by.startswith("admin_"):
+        if risk.requires_confirmation and not confirmed and not task.created_by.startswith("admin_"):
             raise RiskBlockedError(
                 f"Task {task.id} requires user confirmation due to {risk.value} risk level",
                 risk_level=risk.value,
