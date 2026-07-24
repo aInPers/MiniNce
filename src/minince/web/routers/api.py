@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from minince.infrastructure.database.connection import get_db
@@ -195,7 +195,7 @@ async def delete_backup(
 @router.post("/templates/{template_id}/render")
 async def render_template(
     template_id: int,
-    variables: dict[str, object] | None = None,
+    variables: dict[str, object] | None = Body(default=None),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     from minince.application.services.template_renderer import TemplateRenderer
@@ -227,8 +227,8 @@ async def render_template(
 
 @router.post("/templates/validate")
 async def validate_template(
-    template_content: str,
-    variable_schema: dict[str, object] | None = None,
+    template_content: str = Body(...),
+    variable_schema: dict[str, object] | None = Body(default=None),
 ) -> dict[str, object]:
     from minince.application.services.template_renderer import TemplateRenderer
 
