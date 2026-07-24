@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}创建VLAN任务 - MiniNCE{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>创建VLAN配置任务</h2>
+        <a href="/tasks" class="btn btn-secondary">返回列表</a>
+    </div>
+    {% if error %}
+    <div class="error-message">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/tasks/new/vlan">
+        <div class="form-group">
+            <label>选择设备 *</label>
+            <select name="device_id" required>
+                <option value="">请选择设备</option>
+                {% for device in devices %}
+                <option value="{{ device.id }}" {% if form_data and form_data.get('device_id') == device.id|string %}selected{% endif %}>
+                    {{ device.name }} ({{ device.management_ip }})
+                </option>
+                {% endfor %}
+            </select>
+            {% if not devices %}
+            <p style="color:#e53e3e;font-size:13px;margin-top:8px">请先创建设备</p>
+            {% endif %}
+        </div>
+        <div class="grid-2">
+            <div class="form-group">
+                <label>操作类型 *</label>
+                <select name="operation" required>
+                    <option value="create" {% if form_data and form_data.get('operation') == 'create' %}selected{% endif %}>创建</option>
+                    <option value="update" {% if form_data and form_data.get('operation') == 'update' %}selected{% endif %}>修改</option>
+                    <option value="delete" {% if form_data and form_data.get('operation') == 'delete' %}selected{% endif %}>删除</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>VLAN ID * (1-4094)</label>
+                <input type="number" name="vlan_id" value="{{ form_data.get('vlan_id', '') if form_data else '' }}" required min="1" max="4094">
+            </div>
+            <div class="form-group">
+                <label>VLAN名称</label>
+                <input type="text" name="name" value="{{ form_data.get('name', '') if form_data else '' }}" placeholder="可选">
+            </div>
+            <div class="form-group">
+                <label>描述</label>
+                <input type="text" name="description" value="{{ form_data.get('description', '') if form_data else '' }}" placeholder="可选">
+            </div>
+        </div>
+        <div style="margin-top:24px;display:flex;gap:12px">
+            <button type="submit" class="btn btn-primary">创建任务</button>
+            <a href="/tasks" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

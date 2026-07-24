@@ -51,6 +51,7 @@ async def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse
         task_count=task_count,
         active_task_count=active_task_count,
         recent_tasks=recent_tasks,
+        active_page="home",
     )
     return HTMLResponse(content=html)
 

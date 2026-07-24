@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}创建接口任务 - MiniNCE{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>创建接口配置任务</h2>
+        <a href="/tasks" class="btn btn-secondary">返回列表</a>
+    </div>
+    {% if error %}
+    <div class="error-message">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/tasks/new/interface">
+        <div class="form-group">
+            <label>选择设备 *</label>
+            <select name="device_id" required>
+                <option value="">请选择设备</option>
+                {% for device in devices %}
+                <option value="{{ device.id }}" {% if form_data and form_data.get('device_id') == device.id|string %}selected{% endif %}>
+                    {{ device.name }} ({{ device.management_ip }})
+                </option>
+                {% endfor %}
+            </select>
+            {% if not devices %}
+            <p style="color:#e53e3e;font-size:13px;margin-top:8px">请先创建设备</p>
+            {% endif %}
+        </div>
+        <div class="grid-2">
+            <div class="form-group">
+                <label>接口名称 *</label>
+                <input type="text" name="interface_name" value="{{ form_data.get('interface_name', '') if form_data else '' }}" required placeholder="GigabitEthernet0/0/1">
+            </div>
+            <div class="form-group">
+                <label>描述</label>
+                <input type="text" name="description" value="{{ form_data.get('description', '') if form_data else '' }}">
+            </div>
+            <div class="form-group">
+                <label>管理状态</label>
+                <select name="admin_up">
+                    <option value="">不修改</option>
+                    <option value="on" {% if form_data and form_data.get('admin_up') == 'on' %}selected{% endif %}>启用</option>
+                    <option value="off" {% if form_data and form_data.get('admin_up') == 'off' %}selected{% endif %}>关闭</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>链路类型</label>
+                <select name="link_type">
+                    <option value="">不修改</option>
+                    <option value="access" {% if form_data and form_data.get('link_type') == 'access' %}selected{% endif %}>Access</option>
+                    <option value="trunk" {% if form_data and form_data.get('link_type') == 'trunk' %}selected{% endif %}>Trunk</option>
+                    <option value="hybrid" {% if form_data and form_data.get('link_type') == 'hybrid' %}selected{% endif %}>Hybrid</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Access VLAN</label>
+                <input type="number" name="access_vlan" value="{{ form_data.get('access_vlan', '') if form_data else '' }}" min="1" max="4094" placeholder="1-4094">
+            </div>
+            <div class="form-group">
+                <label>Trunk 允许VLAN (逗号分隔)</label>
+                <input type="text" name="trunk_allowed_vlans" value="{{ form_data.get('trunk_allowed_vlans', '') if form_data else '' }}" placeholder="10,20,30">
+            </div>
+        </div>
+        <div style="margin-top:24px;display:flex;gap:12px">
+            <button type="submit" class="btn btn-primary">创建任务</button>
+            <a href="/tasks" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

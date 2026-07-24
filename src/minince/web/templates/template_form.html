@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{% if action == 'create' %}添加模板{% else %}编辑模板{% endif %} - MiniNCE{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>{% if action == 'create' %}添加配置模板{% else %}编辑配置模板{% endif %}</h2>
+        <a href="/templates" class="btn btn-secondary">返回列表</a>
+    </div>
+    {% if error %}
+    <div class="error-message">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="{% if action == 'create' %}/templates{% else %}/templates/{{ template.id }}{% endif %}">
+        <div class="grid-2">
+            <div class="form-group">
+                <label>模板名称 *</label>
+                <input type="text" name="name" value="{{ template.name if template and template.name else '' }}" required>
+            </div>
+            <div class="form-group">
+                <label>厂商 *</label>
+                <select name="vendor">
+                    {% for v in ['HUAWEI', 'CISCO', 'H3C', 'JUNIPER', 'GENERIC'] %}
+                    <option value="{{ v }}" {% if template and template.vendor == v %}selected{% endif %}>{{ v }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>功能 *</label>
+                <select name="feature">
+                    {% for f in ['VLAN', 'INTERFACE', 'ROUTING', 'ACL', 'NAT', 'AAA', 'CUSTOM'] %}
+                    <option value="{{ f }}" {% if template and template.feature == f %}selected{% endif %}>{{ f }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>版本</label>
+                <input type="text" name="version" value="{{ template.version if template and template.version else '1.0' }}">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>模板内容 (Jinja2格式) *</label>
+            <textarea name="template_content" required placeholder="vlan {{ '{{' }} vlan_id {{ '}}' }}
+ name {{ '{{' }} vlan_name {{ '}}' }}
+description {{ '{{' }} vlan_desc {{ '}}' }}">{{ template.template_content if template and template.template_content else '' }}</textarea>
+        </div>
+        <div class="form-group">
+            <div class="checkbox-group">
+                <input type="checkbox" name="enabled" {% if not template or template.enabled %}checked{% endif %}>
+                <label style="margin-bottom:0">启用</label>
+            </div>
+        </div>
+        <div style="margin-top:24px;display:flex;gap:12px">
+            <button type="submit" class="btn btn-primary">{% if action == 'create' %}创建模板{% else %}保存修改{% endif %}</button>
+            <a href="/templates" class="btn btn-secondary">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}设备详情 - {{ device.name }} - MiniNCE{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>{{ device.name }}</h2>
+        <div class="btn-group">
+            <a href="/devices/{{ device.id }}/edit" class="btn btn-secondary">编辑</a>
+            <form method="post" action="/devices/{{ device.id }}/delete" style="display:inline" onsubmit="return confirm('确定删除该设备?')">
+                <button type="submit" class="btn btn-danger">删除</button>
+            </form>
+        </div>
+    </div>
+    {% if test_result %}
+    <div class="success-message">连接测试成功: {{ test_result.message }}</div>
+    {% endif %}
+    <div class="grid-2">
+        <div>
+            <div class="section-title">基本信息</div>
+            <table>
+                <tr><th>ID</th><td>{{ device.id }}</td></tr>
+                <tr><th>名称</th><td>{{ device.name }}</td></tr>
+                <tr><th>主机名</th><td>{{ device.hostname }}</td></tr>
+                <tr><th>厂商</th><td>{{ device.vendor }}</td></tr>
+                <tr><th>平台</th><td>{{ device.platform or '-' }}</td></tr>
+                <tr><th>连接类型</th><td>{{ device.connection_type }}</td></tr>
+            </table>
+        </div>
+        <div>
+            <div class="section-title">连接信息</div>
+            <table>
+                <tr><th>管理IP</th><td>{{ device.management_ip }}</td></tr>
+                <tr><th>端口</th><td>{{ device.port }}</td></tr>
+                <tr><th>用户名</th><td>{{ device.username }}</td></tr>
+                <tr><th>状态</th><td><span class="status-badge status-{{ device.status }}">{{ device.status }}</span></td></tr>
+                <tr><th>最后连接</th><td>{{ device.last_connected_at or '从未连接' }}</td></tr>
+                <tr><th>描述</th><td>{{ device.description or '-' }}</td></tr>
+            </table>
+        </div>
+    </div>
+    <div class="section-title">操作</div>
+    <form method="post" action="/devices/{{ device.id }}/test">
+        <button type="submit" class="btn btn-primary">🔌 测试连接</button>
+    </form>
+</div>
+{% endblock %}

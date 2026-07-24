@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}设备管理 - MiniNCE{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>设备列表 ({{ total }})</h2>
+        <a href="/devices/new" class="btn btn-primary">+ 添加设备</a>
+    </div>
+    {% if devices %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>IP地址</th>
+                <th>厂商</th>
+                <th>状态</th>
+                <th>最后连接</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for device in devices %}
+            <tr>
+                <td>{{ device.id }}</td>
+                <td><a href="/devices/{{ device.id }}">{{ device.name }}</a></td>
+                <td>{{ device.management_ip }}:{{ device.port }}</td>
+                <td>{{ device.vendor }}</td>
+                <td><span class="status-badge status-{{ device.status }}">{{ device.status }}</span></td>
+                <td>{{ device.last_connected_at or '从未连接' }}</td>
+                <td>
+                    <div class="btn-group">
+                        <a href="/devices/{{ device.id }}/edit" class="btn btn-sm btn-secondary">编辑</a>
+                        <form method="post" action="/devices/{{ device.id }}/delete" style="display:inline" onsubmit="return confirm('确定删除该设备?')">
+                            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🖥️</div>
+        <p>暂无设备记录</p>
+        <p style="margin-top:8px;font-size:13px">点击"添加设备"开始管理网络设备</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
