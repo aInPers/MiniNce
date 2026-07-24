@@ -51,6 +51,7 @@ class TaskExecutor:
 
         self._validate_risk(task, confirmed=confirmed)
 
+        driver = None
         try:
             self._transition(task_id, TaskStatus.VALIDATING.value)
 
@@ -187,6 +188,10 @@ class TaskExecutor:
                 f"Unexpected error during task {task_id} execution: {e}",
                 details={"task_id": task_id},
             )
+        finally:
+            # 确保在任务完成后断开 SSH 连接，释放设备会话
+            if driver is not None:
+                driver.disconnect()
 
     def preview_task(self, task_id: int) -> ConfigPlan:
         task = self._task_repo.get_by_id(task_id)

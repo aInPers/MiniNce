@@ -34,8 +34,9 @@ class TestHuaweiVRPDriverConnection:
         driver = HuaweiVRPDriver()
         facts = driver.get_facts()
 
-        assert facts.hostname == ""
-        assert facts.model == ""
+        # 默认使用 MockSSHConnection，_ensure_connected 会自动连接
+        assert facts.vendor == "HUAWEI"
+        assert facts.hostname
 
 
 class TestHuaweiVRPDriverVLAN:

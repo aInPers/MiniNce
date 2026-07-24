@@ -71,6 +71,29 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
             )
             self._ssh_connection = _create_ssh_connection(ssh_config)
 
+    def _ensure_connected(self) -> bool:
+        """确保 SSH 连接已建立并保持，供实际操作使用。
+
+        与 test_connection 不同，此方法不会在连接后断开。
+        """
+        if self._connected:
+            return True
+        try:
+            self._ssh_connection.connect()
+            self._connected = True
+            return True
+        except Exception:
+            return False
+
+    def disconnect(self) -> None:
+        """断开 SSH 连接，释放设备会话。"""
+        if self._connected:
+            try:
+                self._ssh_connection.disconnect()
+            except Exception:
+                pass
+            self._connected = False
+
     def test_connection(self) -> ConnectionResult:
         start_time = time.time()
         response_time_ms = 0
@@ -87,25 +110,33 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
             self._ssh_connection.connect()
             self._connected = True
             response_time_ms = int((time.time() - start_time) * 1000)
-            return ConnectionResult(
+            result = ConnectionResult(
                 success=True,
                 message=f"Successfully connected to {self.host}:{self.port}",
                 response_time_ms=response_time_ms,
             )
         except Exception as e:
             self._connected = False
-            return ConnectionResult(
+            result = ConnectionResult(
                 success=False,
                 message=str(e),
                 response_time_ms=response_time_ms,
                 error_type="CONNECTION_ERROR",
             )
+        finally:
+            # 测试完成后立即断开连接，避免占用设备的 SSH 会话
+            # 华为设备通常限制并发 SSH 连接数
+            if self._connected:
+                try:
+                    self._ssh_connection.disconnect()
+                    self._connected = False
+                except Exception:
+                    pass
+        return result
 
     def get_facts(self) -> DeviceFacts:
-        if not self._connected:
-            result = self.test_connection()
-            if not result.success:
-                return DeviceFacts()
+        if not self._ensure_connected():
+            return DeviceFacts()
 
         try:
             output = self._ssh_connection.send_command("display version")
@@ -157,13 +188,11 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
             )
 
     def apply_plan(self, plan: ConfigPlan) -> ExecutionResult:
-        if not self._connected:
-            result = self.test_connection()
-            if not result.success:
-                return ExecutionResult(
-                    success=False,
-                    error_message=f"Failed to connect: {result.message}",
-                )
+        if not self._ensure_connected():
+            return ExecutionResult(
+                success=False,
+                error_message="Failed to connect to device",
+            )
 
         if not plan.changed:
             return ExecutionResult(
@@ -211,10 +240,8 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
             )
 
     def get_running_config(self) -> str:
-        if not self._connected:
-            result = self.test_connection()
-            if not result.success:
-                return ""
+        if not self._ensure_connected():
+            return ""
 
         try:
             output = self._ssh_connection.send_command("display current-configuration")
