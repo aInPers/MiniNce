@@ -70,6 +70,13 @@ class MockSSHConnection:
                 del self._simulated_vlans[vlan_id]
             return "Info: The operation is successful."
 
+        if cmd.startswith("undo interface "):
+            # 删除接口（如 undo interface Vlanif100 删除 VLANIF 接口）
+            ifname = cmd.split(None, 2)[2].strip()
+            if ifname in self._simulated_interfaces:
+                del self._simulated_interfaces[ifname]
+            return "Info: The operation is successful."
+
         if cmd.startswith("interface "):
             self._handle_interface_cmd(cmd)
             return f"Enter the interface view of {self._current_ifname}."

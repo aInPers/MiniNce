@@ -250,7 +250,8 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         """从真实设备获取 VLAN 状态。
 
         使用 display vlan {id} 判断 VLAN 是否存在，
-        使用 display current-configuration | section vlan {id} 获取 name 和 description。
+        使用 display current-configuration | section vlan {id} 获取 name 和 description，
+        并检测是否存在关联的 VLANIF 接口（删除时需先删除）。
         """
         vlan_id = intent_dict.get("vlan_id", 0)
 
@@ -279,6 +280,9 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         except Exception:
             pass
 
+        # 3. 检测是否存在关联的 VLANIF 接口（L3 接口）
+        has_vlanif = self._check_vlanif_exists(vlan_id)
+
         return CurrentState(
             feature="VLAN",
             exists=True,
@@ -286,8 +290,38 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
                 "vlan_id": vlan_id,
                 "name": name,
                 "description": description,
+                "has_vlanif": has_vlanif,
             },
         )
+
+    def _check_vlanif_exists(self, vlan_id: int) -> bool:
+        """检测指定 VLAN 是否关联了 VLANIF 接口（Layer 3 虚拟接口）。
+
+        使用 display current-configuration interface Vlanif{id} 查询，
+        若输出中包含 "interface Vlanif{id}" 则认为存在。
+
+        Args:
+            vlan_id: VLAN 编号
+
+        Returns:
+            True 表示存在 VLANIF 接口，False 表示不存在
+        """
+        try:
+            output = self._ssh_connection.send_command(
+                f"display current-configuration interface Vlanif{vlan_id}"
+            )
+        except Exception:
+            return False
+
+        if not output:
+            return False
+
+        # 真实设备在接口不存在时会返回错误信息
+        if "Error" in output or "does not exist" in output.lower():
+            return False
+
+        # 检查输出中是否包含 Vlanif 接口定义
+        return f"interface Vlanif{vlan_id}" in output
 
     def _get_interface_state(self, intent_dict: dict[str, Any]) -> CurrentState:
         """从真实设备获取接口状态。

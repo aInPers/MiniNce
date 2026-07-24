@@ -76,6 +76,20 @@ class HuaweiVRPCommandGenerator:
         elif operation == "delete":
             changed = vlan_exists
             if changed:
+                # 若存在关联的 VLANIF 接口（L3 接口），必须先删除，
+                # 否则设备会报错 "The VLAN has a L3 interface. Please delete it first."
+                if current_data.get("has_vlanif"):
+                    undo_vlanif_cmd = f"undo interface Vlanif{vlan_id}"
+                    commands.append(undo_vlanif_cmd)
+                    steps.append(ConfigStep(
+                        name="delete_vlanif",
+                        command=undo_vlanif_cmd,
+                        description=f"Delete Vlanif{vlan_id} (L3 interface) before deleting VLAN",
+                    ))
+                    warnings.append(
+                        f"VLAN {vlan_id} has a L3 interface (Vlanif{vlan_id}), "
+                        f"it will be deleted first"
+                    )
                 commands.append(f"undo vlan {vlan_id}")
                 steps.append(ConfigStep(
                     name="delete_vlan",
