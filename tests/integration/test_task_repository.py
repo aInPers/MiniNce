@@ -13,7 +13,7 @@ class TestTaskRepository:
         device = device_repo.create(
             name="SW-Test",
             hostname="sw-test",
-            management_ip="10.0.0.1",
+            management_ip="mock:10.0.0.1",
             encrypted_password="enc",
             vendor="HUAWEI",
             username="admin",

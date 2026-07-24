@@ -8,11 +8,11 @@ from minince.shared.enums import RiskLevel
 
 class TestHuaweiVRPDriverConnection:
     def test_connection_success(self) -> None:
-        driver = HuaweiVRPDriver(host="192.168.1.1", port=22, username="admin", password="test")
+        driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
         result = driver.test_connection()
 
         assert result.success is True
-        assert "192.168.1.1" in result.message
+        assert "mock:192.168.1.1" in result.message
 
     def test_connection_no_host(self) -> None:
         driver = HuaweiVRPDriver()
@@ -22,7 +22,7 @@ class TestHuaweiVRPDriverConnection:
         assert result.error_type == "NO_HOST"
 
     def test_get_facts_when_connected(self) -> None:
-        driver = HuaweiVRPDriver(host="192.168.1.1", port=22, username="admin", password="test")
+        driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
         driver.test_connection()
         facts = driver.get_facts()
 
@@ -40,7 +40,7 @@ class TestHuaweiVRPDriverConnection:
 
 class TestHuaweiVRPDriverVLAN:
     def setup_method(self) -> None:
-        self.driver = HuaweiVRPDriver(host="192.168.1.1", port=22, username="admin", password="test")
+        self.driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
         self.driver.test_connection()
 
     def test_get_current_state_vlan_not_exists(self) -> None:
@@ -142,7 +142,7 @@ class TestHuaweiVRPDriverVLAN:
 
 class TestHuaweiVRPDriverInterface:
     def setup_method(self) -> None:
-        self.driver = HuaweiVRPDriver(host="192.168.1.1", port=22, username="admin", password="test")
+        self.driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
         self.driver.test_connection()
 
     def test_get_current_state_interface(self) -> None:
@@ -235,7 +235,7 @@ class TestHuaweiVRPDriverInterface:
 
 class TestHuaweiVRPDriverUnsupported:
     def setup_method(self) -> None:
-        self.driver = HuaweiVRPDriver(host="192.168.1.1", port=22, username="admin", password="test")
+        self.driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
         self.driver.test_connection()
 
     def test_unsupported_feature(self) -> None:

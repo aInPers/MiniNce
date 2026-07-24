@@ -10,8 +10,25 @@ from minince.domain.network.config_plan import ConfigPlan, ExecutionResult, Veri
 from minince.infrastructure.drivers.huawei_vrp.command_generator import HuaweiVRPCommandGenerator
 from minince.infrastructure.drivers.huawei_vrp.parser import HuaweiVRPParser
 from minince.infrastructure.ssh.base import SSHConfig, SSHConnection
-from minince.infrastructure.ssh.mock_connection import MockSSHConnection
 from minince.shared.enums import RiskLevel
+
+
+def _create_ssh_connection(config: SSHConfig) -> SSHConnection:
+    """根据 host 自动选择 SSH 后端。
+
+    - host 为空或 "mock" 开头时使用 MockSSHConnection（用于测试）
+    - 其他情况尝试使用 ParamikoSSHConnection（真实设备）
+    """
+    if not config.host or config.host.startswith("mock"):
+        from minince.infrastructure.ssh.mock_connection import MockSSHConnection
+        return MockSSHConnection(config)
+
+    try:
+        from minince.infrastructure.ssh.paramiko_connection import ParamikoSSHConnection
+        return ParamikoSSHConnection(config)
+    except ImportError:
+        from minince.infrastructure.ssh.mock_connection import MockSSHConnection
+        return MockSSHConnection(config)
 
 
 class HuaweiVRPDriver(NetworkDeviceDriver):
@@ -52,7 +69,7 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
                 device_type="",
                 enable_password=enable_password,
             )
-            self._ssh_connection = MockSSHConnection(ssh_config)
+            self._ssh_connection = _create_ssh_connection(ssh_config)
 
     def test_connection(self) -> ConnectionResult:
         start_time = time.time()

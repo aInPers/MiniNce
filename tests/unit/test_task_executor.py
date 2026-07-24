@@ -30,7 +30,7 @@ def test_device(test_db: Session) -> int:
     device = device_repo.create(
         name="TestSwitch",
         hostname="TestSwitch",
-        management_ip="192.168.1.1",
+        management_ip="mock:192.168.1.1",
         encrypted_password=encryption.encrypt("testpass"),
         vendor="HUAWEI",
         username="admin",
