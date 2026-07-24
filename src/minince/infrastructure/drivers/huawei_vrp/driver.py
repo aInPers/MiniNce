@@ -17,18 +17,14 @@ def _create_ssh_connection(config: SSHConfig) -> SSHConnection:
     """根据 host 自动选择 SSH 后端。
 
     - host 为空或 "mock" 开头时使用 MockSSHConnection（用于测试）
-    - 其他情况尝试使用 ParamikoSSHConnection（真实设备）
+    - 其他情况使用 ParamikoSSHConnection（真实设备）
     """
     if not config.host or config.host.startswith("mock"):
         from minince.infrastructure.ssh.mock_connection import MockSSHConnection
         return MockSSHConnection(config)
 
-    try:
-        from minince.infrastructure.ssh.paramiko_connection import ParamikoSSHConnection
-        return ParamikoSSHConnection(config)
-    except ImportError:
-        from minince.infrastructure.ssh.mock_connection import MockSSHConnection
-        return MockSSHConnection(config)
+    from minince.infrastructure.ssh.paramiko_connection import ParamikoSSHConnection
+    return ParamikoSSHConnection(config)
 
 
 class HuaweiVRPDriver(NetworkDeviceDriver):
@@ -52,12 +48,6 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         self._connected = False
         self._generator = HuaweiVRPCommandGenerator()
         self._parser = HuaweiVRPParser()
-        self._simulated_state: dict[str, Any] = {}
-        self._simulated_vlans: dict[int, dict[str, Any]] = {}
-        self._simulated_interfaces: dict[str, dict[str, Any]] = {}
-        self._context_stack: list[dict[str, Any]] = []
-        self._current_vlan_id: int | None = None
-        self._current_ifname: str | None = None
 
         if self._ssh_connection is None:
             ssh_config = SSHConfig(
@@ -72,10 +62,7 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
             self._ssh_connection = _create_ssh_connection(ssh_config)
 
     def _ensure_connected(self) -> bool:
-        """确保 SSH 连接已建立并保持，供实际操作使用。
-
-        与 test_connection 不同，此方法不会在连接后断开。
-        """
+        """确保 SSH 连接已建立并保持，供实际操作使用。"""
         if self._connected:
             return True
         try:
@@ -124,8 +111,6 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
                 error_type="CONNECTION_ERROR",
             )
         finally:
-            # 测试完成后立即断开连接，避免占用设备的 SSH 会话
-            # 华为设备通常限制并发 SSH 连接数
             if self._connected:
                 try:
                     self._ssh_connection.disconnect()
@@ -142,16 +127,12 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
             output = self._ssh_connection.send_command("display version")
             return self._parse_version_output(output)
         except Exception:
-            return DeviceFacts(
-                hostname=self._simulated_state.get("hostname", f"SW-{self.host.split('.')[-1] if self.host else 'UNKNOWN'}"),
-                model=self._simulated_state.get("model", "S5720-28X-SI-AC"),
-                firmware_version=self._simulated_state.get("firmware_version", "VRP (R) Software Version V200R023C00SPC600"),
-                vendor="HUAWEI",
-                serial_number=self._simulated_state.get("serial_number", ""),
-                uptime=self._simulated_state.get("uptime", "0 days, 0:00:00"),
-            )
+            return DeviceFacts()
 
     def get_current_state(self, intent: object) -> CurrentState:
+        if not self._ensure_connected():
+            return CurrentState(feature="", exists=False, data={})
+
         intent_dict = self._to_dict(intent)
         feature = intent_dict.get("feature", "")
 
@@ -160,7 +141,7 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         elif feature == "INTERFACE":
             return self._get_interface_state(intent_dict)
         else:
-            return CurrentState(feature=feature, exists=False)
+            return CurrentState(feature=feature, exists=False, data={})
 
     def build_plan(
         self,
@@ -226,6 +207,12 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         )
 
     def verify(self, intent: object) -> VerificationResult:
+        if not self._ensure_connected():
+            return VerificationResult(
+                success=False,
+                error_message="Failed to connect to device for verification",
+            )
+
         intent_dict = self._to_dict(intent)
         feature = intent_dict.get("feature", "")
 
@@ -260,53 +247,72 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         return True
 
     def _get_vlan_state(self, intent_dict: dict[str, Any]) -> CurrentState:
+        """从真实设备获取 VLAN 状态。
+
+        使用 display vlan {id} 判断 VLAN 是否存在，
+        使用 display current-configuration | section vlan {id} 获取 name 和 description。
+        """
         vlan_id = intent_dict.get("vlan_id", 0)
 
+        # 1. 判断 VLAN 是否存在
         try:
             output = self._ssh_connection.send_command(f"display vlan {vlan_id}")
-            return self._parse_vlan_state_output(output, vlan_id)
+        except Exception as e:
+            return CurrentState(
+                feature="VLAN",
+                exists=False,
+                data={"error": f"Failed to query VLAN: {e}"},
+            )
+
+        if not output or "does not exist" in output.lower() or "Error" in output:
+            return CurrentState(feature="VLAN", exists=False, data={})
+
+        # 2. 获取 VLAN 详细配置（name, description）
+        name = ""
+        description = ""
+        try:
+            config_output = self._ssh_connection.send_command(
+                f"display current-configuration | section vlan {vlan_id}"
+            )
+            if config_output and "Error" not in config_output:
+                name, description = self._parse_vlan_config_section(config_output, vlan_id)
         except Exception:
             pass
-
-        vlan_data = self._simulated_vlans.get(vlan_id)
-        if vlan_data is None:
-            return CurrentState(feature="VLAN", exists=False, data={})
 
         return CurrentState(
             feature="VLAN",
             exists=True,
             data={
                 "vlan_id": vlan_id,
-                "name": vlan_data.get("name", ""),
-                "description": vlan_data.get("description", ""),
+                "name": name,
+                "description": description,
             },
         )
 
     def _get_interface_state(self, intent_dict: dict[str, Any]) -> CurrentState:
+        """从真实设备获取接口状态。
+
+        使用 display current-configuration interface {ifname} 获取接口配置。
+        """
         ifname = intent_dict.get("interface_name", "")
-
-        try:
-            output = self._ssh_connection.send_command(f"display interface {ifname}")
-            return self._parse_interface_state_output(output, ifname)
-        except Exception:
-            pass
-
-        iface_data = self._simulated_interfaces.get(ifname)
-        if iface_data is None:
+        if not ifname:
             return CurrentState(feature="INTERFACE", exists=False, data={})
 
-        return CurrentState(
-            feature="INTERFACE",
-            exists=True,
-            data={
-                "interface_name": ifname,
-                "description": iface_data.get("description"),
-                "admin_up": iface_data.get("admin_up", True),
-                "link_type": iface_data.get("link_type"),
-                "access_vlan": iface_data.get("access_vlan"),
-                "trunk_allowed_vlans": iface_data.get("trunk_allowed_vlans", []),
-            },
-        )
+        try:
+            output = self._ssh_connection.send_command(
+                f"display current-configuration interface {ifname}"
+            )
+        except Exception as e:
+            return CurrentState(
+                feature="INTERFACE",
+                exists=False,
+                data={"error": f"Failed to query interface: {e}"},
+            )
+
+        if not output or "Error" in output or "does not exist" in output.lower():
+            return CurrentState(feature="INTERFACE", exists=False, data={})
+
+        return self._parse_interface_config(output, ifname)
 
     def _execute_command(self, command: str) -> str:
         cmd = command.strip()
@@ -331,11 +337,16 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         hostname_match = re.search(r"(\S+)\s+uptime", output)
         hostname = hostname_match.group(1) if hostname_match else self.host or "UNKNOWN"
 
-        model_match = re.search(r"(\w+-\w+-\w+-\w+)", output)
+        model_match = re.search(r"Huawei\s+(\S+)\s+Router", output, re.IGNORECASE)
+        if not model_match:
+            model_match = re.search(r"(\w+-\w+-\w+-\w+)", output)
         model = model_match.group(1) if model_match else "Unknown"
 
         version_match = re.search(r"Software,\s*Version\s+(.+)", output)
         firmware = version_match.group(1).strip() if version_match else "Unknown"
+
+        uptime_match = re.search(r"uptime is (.+)", output)
+        uptime = uptime_match.group(1).strip() if uptime_match else "0 days, 0:00:00"
 
         return DeviceFacts(
             hostname=hostname,
@@ -343,58 +354,110 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
             firmware_version=firmware,
             vendor="HUAWEI",
             serial_number="",
-            uptime="0 days, 0:00:00",
+            uptime=uptime,
         )
 
-    def _parse_vlan_state_output(self, output: str, vlan_id: int) -> CurrentState:
-        if "does not exist" in output.lower() or "error" in output.lower():
-            return CurrentState(feature="VLAN", exists=False, data={})
+    @staticmethod
+    def _parse_vlan_list(vlan_str: str) -> list[int]:
+        """从字符串中解析 VLAN 列表，支持空格、逗号分隔及范围表示。
 
-        name_match = re.search(r"Name:\s*(\S+)", output)
-        desc_match = re.search(r"Description:\s*(.+)", output)
+        支持格式：
+        - "10 20 30"（空格分隔）
+        - "10,20,30"（逗号分隔）
+        - "10-20"（范围）
+        - "10 20-30,40"（混合）
 
-        return CurrentState(
-            feature="VLAN",
-            exists=True,
-            data={
-                "vlan_id": vlan_id,
-                "name": name_match.group(1) if name_match else "",
-                "description": desc_match.group(1).strip() if desc_match else "",
-            },
-        )
+        Args:
+            vlan_str: 包含 VLAN 编号的字符串
 
-    def _parse_interface_state_output(self, output: str, ifname: str) -> CurrentState:
-        if "error" in output.lower() or "does not exist" in output.lower():
-            return CurrentState(feature="INTERFACE", exists=False, data={})
+        Returns:
+            解析后的 VLAN 编号列表
+        """
+        vlans: list[int] = []
+        # 将逗号统一替换为空格后再按空格切分，统一处理两种分隔符
+        normalized = vlan_str.replace(",", " ")
+        for part in normalized.split():
+            part = part.strip()
+            if not part:
+                continue
+            if "-" in part:
+                start_end = part.split("-", 1)
+                try:
+                    start, end = int(start_end[0]), int(start_end[1])
+                    vlans.extend(range(start, end + 1))
+                except (ValueError, IndexError):
+                    pass
+            elif part.isdigit():
+                vlans.append(int(part))
+        return vlans
 
-        link_type_match = re.search(r"Link type:(\w+)", output)
-        desc_match = re.search(r"Description:\s*(.+)", output)
-        admin_up_match = re.search(r"line protocol is (\w+)", output)
+    def _parse_vlan_config_section(self, output: str, vlan_id: int) -> tuple[str, str]:
+        """从 display current-configuration | section vlan {id} 输出中解析 name 和 description。
 
-        link_type = link_type_match.group(1) if link_type_match else "access"
+        华为 VRP 输出格式：
+        #
+        vlan 100
+         name TEST_NAME
+         description TEST_DESC
+        #
+        """
+        name = ""
+        description = ""
+
+        name_match = re.search(r"^\s*name\s+(\S+)", output, re.MULTILINE)
+        if name_match:
+            name = name_match.group(1)
+
+        desc_match = re.search(r"^\s*description\s+(.+)", output, re.MULTILINE)
+        if desc_match:
+            description = desc_match.group(1).strip()
+
+        return name, description
+
+    def _parse_interface_config(self, output: str, ifname: str) -> CurrentState:
+        """从 display current-configuration interface {ifname} 输出中解析接口配置。
+
+        华为 VRP 输出格式：
+        #
+        interface GigabitEthernet0/0/0
+         description TEST_DESC
+         port link-type access
+         port default vlan 10
+         undo shutdown
+        #
+        """
+        description = ""
+        link_type = ""
+        access_vlan: int | None = None
+        trunk_vlans: list[int] = []
         admin_up = True
-        if admin_up_match:
-            admin_up = admin_up_match.group(1).lower() == "up"
 
-        access_vlan = None
-        access_match = re.search(r"Access VLAN:\s*(\d+)", output)
+        desc_match = re.search(r"^\s*description\s+(.+)", output, re.MULTILINE)
+        if desc_match:
+            description = desc_match.group(1).strip()
+
+        link_match = re.search(r"port link-type\s+(\w+)", output)
+        if link_match:
+            link_type = link_match.group(1)
+
+        access_match = re.search(r"port default vlan\s+(\d+)", output)
         if access_match:
             access_vlan = int(access_match.group(1))
 
-        trunk_vlans: list[int] = []
-        trunk_match = re.search(r"Trunk allowed VLANs:\s*(.+)", output)
+        trunk_match = re.search(r"port trunk allow-pass vlan\s+(.+)", output)
         if trunk_match:
-            for v in trunk_match.group(1).split(","):
-                v = v.strip()
-                if v.isdigit():
-                    trunk_vlans.append(int(v))
+            vlan_str = trunk_match.group(1).strip()
+            trunk_vlans.extend(self._parse_vlan_list(vlan_str))
+
+        if "shutdown" in output and "undo shutdown" not in output:
+            admin_up = False
 
         return CurrentState(
             feature="INTERFACE",
             exists=True,
             data={
                 "interface_name": ifname,
-                "description": desc_match.group(1).strip() if desc_match else "",
+                "description": description,
                 "admin_up": admin_up,
                 "link_type": link_type,
                 "access_vlan": access_vlan,
@@ -410,50 +473,14 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
 
         try:
             output = self._ssh_connection.send_command(f"display vlan {vlan_id}")
-            return self._verify_vlan_from_output(output, vlan_id, expected_name, expected_desc, operation)
-        except Exception:
-            pass
-
-        vlan_data = self._simulated_vlans.get(vlan_id)
-
-        if operation == "delete":
-            if vlan_data is None:
-                return VerificationResult(
-                    success=True,
-                    verification_outputs=[{"message": f"VLAN {vlan_id} successfully deleted"}],
-                    details={"vlan_id": vlan_id, "status": "deleted"},
-                )
+        except Exception as e:
             return VerificationResult(
                 success=False,
-                error_message=f"VLAN {vlan_id} still exists after delete operation",
-                details={"vlan_id": vlan_id, "actual_state": vlan_data},
-            )
-
-        if vlan_data is None:
-            return VerificationResult(
-                success=False,
-                error_message=f"VLAN {vlan_id} not found after configuration",
+                error_message=f"Failed to verify VLAN {vlan_id}: {e}",
                 details={"vlan_id": vlan_id},
             )
 
-        mismatches: list[str] = []
-        if expected_name and vlan_data.get("name") != expected_name:
-            mismatches.append(f"name mismatch: expected '{expected_name}', got '{vlan_data.get('name')}'")
-        if expected_desc and vlan_data.get("description") != expected_desc:
-            mismatches.append("description mismatch")
-
-        if mismatches:
-            return VerificationResult(
-                success=False,
-                error_message=f"VLAN {vlan_id} verification failed: {'; '.join(mismatches)}",
-                details={"vlan_id": vlan_id, "mismatches": mismatches, "actual_state": vlan_data},
-            )
-
-        return VerificationResult(
-            success=True,
-            verification_outputs=[{"message": f"VLAN {vlan_id} verification passed"}],
-            details={"vlan_id": vlan_id, "actual_state": vlan_data},
-        )
+        return self._verify_vlan_from_output(output, vlan_id, expected_name, expected_desc, operation)
 
     def _verify_vlan_from_output(
         self,
@@ -464,7 +491,7 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         operation: str,
     ) -> VerificationResult:
         if operation == "delete":
-            if "does not exist" in output.lower():
+            if "does not exist" in output.lower() or "Error" in output:
                 return VerificationResult(
                     success=True,
                     verification_outputs=[{"message": f"VLAN {vlan_id} successfully deleted"}],
@@ -476,26 +503,30 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
                 details={"vlan_id": vlan_id, "output": output[:200]},
             )
 
-        if "does not exist" in output.lower():
+        if "does not exist" in output.lower() or "Error" in output:
             return VerificationResult(
                 success=False,
                 error_message=f"VLAN {vlan_id} not found after configuration",
                 details={"vlan_id": vlan_id},
             )
 
+        # VLAN 存在，获取详细配置进行验证
+        actual_name = ""
+        actual_desc = ""
+        try:
+            config_output = self._ssh_connection.send_command(
+                f"display current-configuration | section vlan {vlan_id}"
+            )
+            if config_output and "Error" not in config_output:
+                actual_name, actual_desc = self._parse_vlan_config_section(config_output, vlan_id)
+        except Exception:
+            pass
+
         mismatches: list[str] = []
-        name_match = re.search(r"Name:\s*(\S+)", output)
-        desc_match = re.search(r"Description:\s*(.+)", output)
-
-        if expected_name and name_match:
-            actual_name = name_match.group(1)
-            if actual_name != expected_name:
-                mismatches.append(f"name mismatch: expected '{expected_name}', got '{actual_name}'")
-
-        if expected_desc and desc_match:
-            actual_desc = desc_match.group(1).strip()
-            if actual_desc != expected_desc:
-                mismatches.append(f"description mismatch: expected '{expected_desc}', got '{actual_desc}'")
+        if expected_name and actual_name != expected_name:
+            mismatches.append(f"name mismatch: expected '{expected_name}', got '{actual_name}'")
+        if expected_desc and actual_desc != expected_desc:
+            mismatches.append(f"description mismatch: expected '{expected_desc}', got '{actual_desc}'")
 
         if mismatches:
             return VerificationResult(
@@ -507,7 +538,7 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         return VerificationResult(
             success=True,
             verification_outputs=[{"message": f"VLAN {vlan_id} verification passed"}],
-            details={"vlan_id": vlan_id},
+            details={"vlan_id": vlan_id, "actual_name": actual_name, "actual_desc": actual_desc},
         )
 
     def _verify_interface(self, intent_dict: dict[str, Any]) -> VerificationResult:
@@ -519,50 +550,19 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         expected_trunk_vlans = intent_dict.get("trunk_allowed_vlans")
 
         try:
-            output = self._ssh_connection.send_command(f"display interface {ifname}")
-            return self._verify_interface_from_output(
-                output, ifname, expected_desc, expected_admin_up,
-                expected_link_type, expected_access_vlan, expected_trunk_vlans,
+            output = self._ssh_connection.send_command(
+                f"display current-configuration interface {ifname}"
             )
-        except Exception:
-            pass
-
-        iface_data = self._simulated_interfaces.get(ifname)
-
-        if iface_data is None:
+        except Exception as e:
             return VerificationResult(
                 success=False,
-                error_message=f"Interface {ifname} not found after configuration",
+                error_message=f"Failed to verify interface {ifname}: {e}",
                 details={"interface_name": ifname},
             )
 
-        mismatches: list[str] = []
-
-        if expected_desc is not None and iface_data.get("description") != expected_desc:
-            mismatches.append("description mismatch")
-        if expected_admin_up is not None and iface_data.get("admin_up") != expected_admin_up:
-            mismatches.append("admin state mismatch")
-        if expected_link_type is not None and iface_data.get("link_type") != expected_link_type:
-            mismatches.append(f"link type mismatch: expected {expected_link_type}, got {iface_data.get('link_type')}")
-        if expected_access_vlan is not None and iface_data.get("access_vlan") != expected_access_vlan:
-            mismatches.append("access VLAN mismatch")
-        if expected_trunk_vlans is not None:
-            actual_trunk = set(iface_data.get("trunk_allowed_vlans", []))
-            expected_trunk = set(expected_trunk_vlans)
-            if actual_trunk != expected_trunk:
-                mismatches.append("trunk VLAN mismatch")
-
-        if mismatches:
-            return VerificationResult(
-                success=False,
-                error_message=f"Interface {ifname} verification failed: {'; '.join(mismatches)}",
-                details={"interface_name": ifname, "mismatches": mismatches, "actual_state": iface_data},
-            )
-
-        return VerificationResult(
-            success=True,
-            verification_outputs=[{"message": f"Interface {ifname} verification passed"}],
-            details={"interface_name": ifname, "actual_state": iface_data},
+        return self._verify_interface_from_output(
+            output, ifname, expected_desc, expected_admin_up,
+            expected_link_type, expected_access_vlan, expected_trunk_vlans,
         )
 
     def _verify_interface_from_output(
@@ -575,7 +575,7 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         expected_access_vlan: int | None,
         expected_trunk_vlans: list[int] | None,
     ) -> VerificationResult:
-        if "error" in output.lower() or "does not exist" in output.lower():
+        if "Error" in output or "does not exist" in output.lower():
             return VerificationResult(
                 success=False,
                 error_message=f"Interface {ifname} not found after configuration",
@@ -584,34 +584,36 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
 
         mismatches: list[str] = []
 
-        desc_match = re.search(r"Description:\s*(.+)", output)
+        desc_match = re.search(r"^\s*description\s+(.+)", output, re.MULTILINE)
         if expected_desc is not None and desc_match:
             actual_desc = desc_match.group(1).strip()
             if actual_desc != expected_desc:
                 mismatches.append(f"description mismatch: expected '{expected_desc}', got '{actual_desc}'")
 
-        admin_match = re.search(r"line protocol is (\w+)", output)
-        if expected_admin_up is not None and admin_match:
-            actual_up = admin_match.group(1).lower() == "up"
-            if actual_up != expected_admin_up:
-                mismatches.append(f"admin state mismatch: expected {'up' if expected_admin_up else 'down'}, got {'up' if actual_up else 'down'}")
+        if "shutdown" in output and "undo shutdown" not in output:
+            actual_up = False
+        else:
+            actual_up = True
+        if expected_admin_up is not None and actual_up != expected_admin_up:
+            mismatches.append(f"admin state mismatch: expected {'up' if expected_admin_up else 'down'}, got {'up' if actual_up else 'down'}")
 
-        link_type_match = re.search(r"Link type:(\w+)", output)
+        link_type_match = re.search(r"port link-type\s+(\w+)", output)
         if expected_link_type is not None and link_type_match:
             actual_type = link_type_match.group(1)
             if actual_type != expected_link_type:
                 mismatches.append(f"link type mismatch: expected {expected_link_type}, got {actual_type}")
 
-        access_match = re.search(r"Access VLAN:\s*(\d+)", output)
+        access_match = re.search(r"port default vlan\s+(\d+)", output)
         if expected_access_vlan is not None and access_match:
             actual_vlan = int(access_match.group(1))
             if actual_vlan != expected_access_vlan:
                 mismatches.append(f"access VLAN mismatch: expected {expected_access_vlan}, got {actual_vlan}")
 
         if expected_trunk_vlans is not None:
-            trunk_match = re.search(r"Trunk allowed VLANs:\s*(.+)", output)
+            trunk_match = re.search(r"port trunk allow-pass vlan\s+(.+)", output)
             if trunk_match:
-                actual_vlans = [int(v.strip()) for v in trunk_match.group(1).split(",") if v.strip().isdigit()]
+                vlan_str = trunk_match.group(1).strip()
+                actual_vlans = self._parse_vlan_list(vlan_str)
                 expected_set = set(expected_trunk_vlans)
                 actual_set = set(actual_vlans)
                 if actual_set != expected_set:
