@@ -10,6 +10,7 @@ build/
 
 # Virtual Environment
 venv/
+.env
 .env/
 env/
 
