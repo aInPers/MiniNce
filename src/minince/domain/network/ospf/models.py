@@ -200,3 +200,36 @@ class OspfProcessIntent(BaseModel):
             },
             ensure_ascii=False,
         )
+
+    @classmethod
+    def from_structured(cls, data: dict[str, Any]) -> OspfProcessIntent:
+        """从 structured_intent 字典重建意图对象。
+
+        供 driver/renderer 使用。data 中每个接口可包含已被 TaskExecutor
+        解密的明文 auth_secret（落库的 auth_secret_encrypted 字段在此忽略）。
+        """
+        interfaces: list[OspfInterfaceIntent] = []
+        for raw in data.get("interfaces") or []:
+            interfaces.append(
+                OspfInterfaceIntent(
+                    interface_name=raw["interface_name"],
+                    area_id=raw["area_id"],
+                    cost=raw.get("cost"),
+                    network_type=raw.get("network_type"),
+                    silent=raw.get("silent", False),
+                    auth_type=raw.get("auth_type", OspfAuthType.NONE),
+                    auth_key_id=raw.get("auth_key_id"),
+                    auth_secret=raw.get("auth_secret"),
+                )
+            )
+        networks = [
+            OspfNetworkIntent(network=n["network"], area_id=n["area_id"])
+            for n in (data.get("networks") or [])
+        ]
+        return cls(
+            operation=data.get("operation", OspfOperation.ENSURE_PRESENT),
+            process_id=data["process_id"],
+            router_id=data.get("router_id"),
+            networks=networks,
+            interfaces=interfaces,
+        )

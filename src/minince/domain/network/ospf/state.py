@@ -78,6 +78,35 @@ class OspfProcessState:
     def empty(cls, process_id: int) -> OspfProcessState:
         return cls(process_id=process_id, running=False)
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OspfProcessState:
+        """从标准化字典重建进程状态（与 to_dict 互逆）。"""
+        if not data:
+            return cls.empty(0)
+        state = cls(
+            process_id=data.get("process_id", 0),
+            running=data.get("running", False),
+            router_id=data.get("router_id"),
+        )
+        for aid, adict in (data.get("areas") or {}).items():
+            state.areas[aid] = OspfAreaState(
+                area_id=aid,
+                networks=list(adict.get("networks") or []),
+                auth_type=adict.get("auth_type", "none"),
+            )
+        for name, idict in (data.get("interfaces") or {}).items():
+            state.interfaces[name] = OspfInterfaceState(
+                interface_name=name,
+                area_id=idict.get("area_id"),
+                cost=idict.get("cost"),
+                network_type=idict.get("network_type"),
+                silent=idict.get("silent", False),
+                auth_type=idict.get("auth_type", "none"),
+                auth_key_id=idict.get("auth_key_id"),
+            )
+        state.silent_interfaces = set(data.get("silent_interfaces") or [])
+        return state
+
     def network_area_map(self) -> dict[str, str]:
         """返回 cidr -> area_id 的映射。"""
         result: dict[str, str] = {}

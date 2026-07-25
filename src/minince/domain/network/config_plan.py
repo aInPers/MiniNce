@@ -25,6 +25,8 @@ class ConfigPlan:
     risk_level: RiskLevel = RiskLevel.LOW
     warnings: list[str] = field(default_factory=list)
     steps: list[ConfigStep] = field(default_factory=list)
+    # 本次明确新增/修改配置对应的回滚命令；第一版仅覆盖本次变更，非完整精确回滚
+    rollback_commands: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +43,7 @@ class ConfigPlan:
                 {"name": s.name, "command": s.command, "description": s.description}
                 for s in self.steps
             ],
+            "rollback_commands": self.rollback_commands,
         }
 
 
