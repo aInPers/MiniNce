@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, String
+from sqlalchemy import JSON, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from minince.infrastructure.database.connection import Base
@@ -59,6 +59,14 @@ class ConfigTask(Base, TimestampMixin):
     created_by: Mapped[str] = mapped_column(String(100), default="system", nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # 乐观锁版本号：用于原子抢占，防止并发执行同一任务
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 执行令牌：抢占成功后生成唯一令牌，后续操作需验证令牌归属
+    execution_token: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # 设备级互斥锁
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
 
 class TaskStep(Base, TimestampMixin):

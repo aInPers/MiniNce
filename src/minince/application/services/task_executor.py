@@ -22,8 +22,23 @@ from minince.shared.exceptions import (
 
 logger = structlog.get_logger()
 
+# 允许执行的任务状态：仅 DRAFT 和 FAILED 可启动执行
+_ALLOWED_EXECUTION_STATES = {TaskStatus.DRAFT.value, TaskStatus.FAILED.value}
+
 
 class TaskExecutor:
+    """任务执行器。
+
+    安全修复说明：
+    - #4: 移除 admin_ 前缀绕过，高风险任务必须显式 confirmed=True
+    - #5: force 不再完全跳过状态机，仅允许从 DRAFT/FAILED 重试
+    - #6: 原子抢占机制，通过 version 字段防止并发执行同一任务
+    - #7: preview_task 添加 try/finally 释放 SSH 连接
+    - #8: 测试连接与执行复用同一 driver，避免连接泄漏
+    - #9: 修复 not in 字符串判断 bug
+    - #13: 步骤记录改为生命周期更新而非每次新建
+    """
+
     def __init__(
         self,
         task_repo: TaskRepository,
@@ -41,50 +56,74 @@ class TaskExecutor:
         if task is None:
             raise TaskNotFoundError(task_id)
 
-        if task.status not in (TaskStatus.DRAFT.value, TaskStatus.FAILED.value):
+        # #5: force 不再完全跳过状态机，仅允许从 DRAFT/FAILED 重试
+        if task.status not in _ALLOWED_EXECUTION_STATES:
             if not force:
                 raise TaskStateError(
                     f"Task {task_id} cannot be executed from state {task.status}",
                     current_state=task.status,
                     expected_state=TaskStatus.DRAFT.value,
                 )
+            # force=True 时仅允许从 DRAFT/FAILED 重试，不允许重执行 RUNNING/VERIFYING/SUCCEEDED
+            raise TaskStateError(
+                f"Task {task_id} is in state {task.status}, force retry only allowed from "
+                f"DRAFT or FAILED states",
+                current_state=task.status,
+                expected_state="DRAFT or FAILED",
+            )
 
+        # #4: 移除 admin_ 前缀绕过，高风险任务必须显式确认
         self._validate_risk(task, confirmed=confirmed)
+
+        # #6: 原子抢占任务，防止并发执行
+        acquired, token = self._task_repo.try_acquire_task(
+            task_id=task_id,
+            expected_status=task.status,
+            new_status=TaskStatus.VALIDATING.value,
+        )
+        if not acquired:
+            raise TaskStateError(
+                f"Task {task_id} was acquired by another executor or state changed",
+                current_state=task.status,
+                expected_state="DRAFT or FAILED",
+            )
 
         driver = None
         try:
-            self._transition(task_id, TaskStatus.VALIDATING.value)
-
             device = self._load_device(task.device_id)
-            self._record_step(task_id, "validate_device", StepStatus.RUNNING,
-                             input_data={"device_id": task.device_id})
 
-            connection_result = self._test_connection(device)
+            # #8: 复用同一 driver 进行连接测试和执行，避免创建多个 SSH 会话
+            driver = self._create_driver(device)
+
+            step_id = self._start_step(task_id, "validate_device",
+                                        input_data={"device_id": task.device_id})
+
+            # 使用复用的 driver 测试连接
+            connection_result = driver.test_connection()
             if not connection_result.success:
-                self._record_step(task_id, "validate_device", StepStatus.FAILED,
+                self._finish_step(step_id, StepStatus.FAILED.value,
                                   output_data=connection_result.to_dict(),
                                   error_message=connection_result.message)
                 self._transition(task_id, TaskStatus.FAILED.value)
                 raise DeviceConnectionError(connection_result.message)
 
-            self._record_step(task_id, "validate_device", StepStatus.SUCCEEDED,
+            self._finish_step(step_id, StepStatus.SUCCEEDED.value,
                               output_data=connection_result.to_dict())
 
             self._transition(task_id, TaskStatus.READY.value)
 
-            driver = self._create_driver(device)
             intent = task.structured_intent or {}
 
-            self._record_step(task_id, "get_current_state", StepStatus.RUNNING,
-                             input_data={"feature": intent.get("feature")})
+            step_id = self._start_step(task_id, "get_current_state",
+                                        input_data={"feature": intent.get("feature")})
             current_state = driver.get_current_state(intent)
-            self._record_step(task_id, "get_current_state", StepStatus.SUCCEEDED,
-                             output_data=current_state.to_dict())
+            self._finish_step(step_id, StepStatus.SUCCEEDED.value,
+                              output_data=current_state.to_dict())
 
-            self._record_step(task_id, "build_plan", StepStatus.RUNNING)
+            step_id = self._start_step(task_id, "build_plan")
             plan = driver.build_plan(intent, current_state)
-            self._record_step(task_id, "build_plan", StepStatus.SUCCEEDED,
-                             output_data=plan.to_dict())
+            self._finish_step(step_id, StepStatus.SUCCEEDED.value,
+                              output_data=plan.to_dict())
 
             task.generated_commands = plan.commands
             task.execution_output = {}
@@ -106,12 +145,13 @@ class TaskExecutor:
 
             if not plan.changed:
                 self._transition(task_id, TaskStatus.VERIFYING.value)
-                self._record_step(task_id, "execute_config", StepStatus.SUCCEEDED,
-                                 output_data={"message": "No changes needed"})
-                self._record_step(task_id, "verify_result", StepStatus.RUNNING)
+                step_id = self._start_step(task_id, "execute_config")
+                self._finish_step(step_id, StepStatus.SUCCEEDED.value,
+                                  output_data={"message": "No changes needed"})
+                step_id = self._start_step(task_id, "verify_result")
                 verification = driver.verify(intent)
-                self._record_step(task_id, "verify_result",
-                                  StepStatus.SUCCEEDED if verification.success else StepStatus.FAILED,
+                self._finish_step(step_id,
+                                  StepStatus.SUCCEEDED.value if verification.success else StepStatus.FAILED.value,
                                   output_data=verification.to_dict())
                 task.verification_output = verification.to_dict()
                 self._task_repo.commit()
@@ -121,12 +161,12 @@ class TaskExecutor:
 
             self._transition(task_id, TaskStatus.RUNNING.value)
 
-            self._record_step(task_id, "execute_config", StepStatus.RUNNING,
-                             input_data={"commands": plan.commands})
+            step_id = self._start_step(task_id, "execute_config",
+                                        input_data={"commands": plan.commands})
             execution_result = driver.apply_plan(plan)
 
-            self._record_step(task_id, "execute_config",
-                             StepStatus.SUCCEEDED if execution_result.success else StepStatus.FAILED,
+            self._finish_step(step_id,
+                             StepStatus.SUCCEEDED.value if execution_result.success else StepStatus.FAILED.value,
                              output_data=execution_result.to_dict(),
                              error_message=execution_result.error_message)
 
@@ -142,11 +182,11 @@ class TaskExecutor:
 
             self._transition(task_id, TaskStatus.VERIFYING.value)
 
-            self._record_step(task_id, "verify_result", StepStatus.RUNNING)
+            step_id = self._start_step(task_id, "verify_result")
             verification = driver.verify(intent)
 
-            self._record_step(task_id, "verify_result",
-                             StepStatus.SUCCEEDED if verification.success else StepStatus.FAILED,
+            self._finish_step(step_id,
+                             StepStatus.SUCCEEDED.value if verification.success else StepStatus.FAILED.value,
                              output_data=verification.to_dict(),
                              error_message=verification.error_message)
 
@@ -171,7 +211,8 @@ class TaskExecutor:
 
         except (DeviceNotFoundError, DeviceConnectionError, TaskExecutionError) as e:
             task = self._task_repo.get_by_id(task_id)
-            if task and task.status not in TaskStatus.FAILED.value:
+            # #9: 修复 not in 字符串判断 bug，改为 != 比较
+            if task and task.status != TaskStatus.FAILED.value:
                 self._transition(task_id, TaskStatus.FAILED.value)
             task.error_message = str(e)
             self._task_repo.commit()
@@ -189,7 +230,7 @@ class TaskExecutor:
                 details={"task_id": task_id},
             )
         finally:
-            # 确保在任务完成后断开 SSH 连接，释放设备会话
+            # #7/#8: 确保在任务完成后断开 SSH 连接，释放设备会话
             if driver is not None:
                 driver.disconnect()
 
@@ -202,29 +243,38 @@ class TaskExecutor:
         driver = self._create_driver(device)
         intent = task.structured_intent or {}
 
-        current_state = driver.get_current_state(intent)
-        plan = driver.build_plan(intent, current_state)
+        # #7: 添加 try/finally 释放 SSH 连接，避免预览泄漏
+        try:
+            current_state = driver.get_current_state(intent)
+            plan = driver.build_plan(intent, current_state)
 
-        task.generated_commands = plan.commands
-        self._task_repo.commit()
+            task.generated_commands = plan.commands
+            self._task_repo.commit()
 
-        self._audit_repo.log(
-            action="PREVIEW",
-            resource_type="TASK",
-            resource_id=str(task_id),
-            actor="system",
-            details={
-                "feature": plan.feature,
-                "command_count": len(plan.commands),
-                "changed": plan.changed,
-            },
-        )
+            self._audit_repo.log(
+                action="PREVIEW",
+                resource_type="TASK",
+                resource_id=str(task_id),
+                actor="system",
+                details={
+                    "feature": plan.feature,
+                    "command_count": len(plan.commands),
+                    "changed": plan.changed,
+                },
+            )
 
-        return plan
+            return plan
+        finally:
+            driver.disconnect()
 
     def _validate_risk(self, task: Any, confirmed: bool = False) -> None:
+        """验证任务风险等级。
+
+        #4: 移除 admin_ 前缀绕过，高风险任务必须显式 confirmed=True。
+        身份和权限不应通过可伪造的字符串前缀判断。
+        """
         risk = RiskLevel(task.risk_level)
-        if risk.requires_confirmation and not confirmed and not task.created_by.startswith("admin_"):
+        if risk.requires_confirmation and not confirmed:
             raise RiskBlockedError(
                 f"Task {task.id} requires user confirmation due to {risk.value} risk level",
                 risk_level=risk.value,
@@ -235,10 +285,6 @@ class TaskExecutor:
         if device is None:
             raise DeviceNotFoundError(device_id)
         return device
-
-    def _test_connection(self, device: Any) -> Any:
-        driver = self._create_driver(device)
-        return driver.test_connection()
 
     def _create_driver(self, device: Any) -> Any:
         password = self._encryption.decrypt(device.encrypted_password)
@@ -260,25 +306,46 @@ class TaskExecutor:
             details={"to": new_status},
         )
 
-    def _record_step(
+    def _start_step(
         self,
         task_id: int,
         step_name: str,
-        status: str,
         input_data: dict[str, Any] | None = None,
-        output_data: dict[str, Any] | None = None,
-        error_message: str | None = None,
-    ) -> None:
+    ) -> int:
+        """启动步骤，#13: 复用未终结的同名步骤而非新建。
+
+        若存在同名的 PENDING/RUNNING 步骤，则复用之；
+        否则创建新步骤并返回其 ID。
+        """
+        existing = self._task_repo.get_active_step_by_name(task_id, step_name)
+        if existing is not None:
+            # 复用已有步骤，更新状态为 RUNNING
+            updated = self._task_repo.update_step(
+                step_id=existing.id,
+                status=StepStatus.RUNNING.value,
+                input_data=input_data,
+            )
+            return updated.id if updated else existing.id
+
         step = self._task_repo.create_step(
             task_id=task_id,
             step_name=step_name,
-            status=status,
+            status=StepStatus.RUNNING.value,
             input_data=input_data,
         )
-        if output_data is not None or error_message is not None:
-            self._task_repo.update_step(
-                step_id=step.id,
-                status=status,
-                output_data=output_data,
-                error_message=error_message,
-            )
+        return step.id
+
+    def _finish_step(
+        self,
+        step_id: int,
+        status: str,
+        output_data: dict[str, Any] | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """完成步骤，更新状态而非创建新记录。"""
+        self._task_repo.update_step(
+            step_id=step_id,
+            status=status,
+            output_data=output_data,
+            error_message=error_message,
+        )

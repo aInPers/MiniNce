@@ -10,7 +10,12 @@ from minince.infrastructure.repositories.device_repository import DeviceReposito
 from minince.infrastructure.repositories.task_repository import TaskRepository
 from minince.infrastructure.security.encryption import EncryptionManager
 from minince.shared.enums import TaskStatus
-from minince.shared.exceptions import DeviceConnectionError, TaskExecutionError, TaskNotFoundError
+from minince.shared.exceptions import (
+    DeviceConnectionError,
+    RiskBlockedError,
+    TaskExecutionError,
+    TaskNotFoundError,
+)
 
 
 @pytest.fixture
@@ -196,10 +201,12 @@ class TestTaskExecutorRiskControl:
         with pytest.raises(Exception):
             executor.execute_task(task.id)
 
-    def test_high_risk_admin_can_execute(self, test_db: Session, test_device: int) -> None:
-        device_repo = DeviceRepository(test_db)
-        device = device_repo.get_by_id(test_device)
+    def test_high_risk_admin_prefix_does_not_bypass(self, test_db: Session, test_device: int) -> None:
+        """#4: admin_ 前缀不再绕过风险确认。
 
+        身份和权限不应通过可伪造的字符串前缀判断。
+        admin_system 创建的高风险任务同样必须显式 confirmed=True。
+        """
         task_repo = TaskRepository(test_db)
         task = task_repo.create(
             task_number="TASK-RISK-002",
@@ -223,7 +230,36 @@ class TestTaskExecutorRiskControl:
             encryption=EncryptionManager(),
         )
 
-        result = executor.execute_task(task.id)
+        # 未显式确认时，即使是 admin_ 前缀创建者，也必须被拦截
+        with pytest.raises(RiskBlockedError):
+            executor.execute_task(task.id)
+
+    def test_high_risk_confirmed_can_execute(self, test_db: Session, test_device: int) -> None:
+        """高风险任务在显式 confirmed=True 时可以执行。"""
+        task_repo = TaskRepository(test_db)
+        task = task_repo.create(
+            task_number="TASK-RISK-003",
+            task_type="VLAN_DELETE",
+            device_id=test_device,
+            risk_level="HIGH",
+            created_by="admin_system",
+        )
+        task.structured_intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 999,
+            "device_id": test_device,
+        }
+        task_repo.commit()
+
+        executor = TaskExecutor(
+            task_repo=task_repo,
+            device_repo=DeviceRepository(test_db),
+            audit_repo=AuditLogRepository(test_db),
+            encryption=EncryptionManager(),
+        )
+
+        result = executor.execute_task(task.id, confirmed=True)
         assert result.status == TaskStatus.SUCCEEDED.value
 
 

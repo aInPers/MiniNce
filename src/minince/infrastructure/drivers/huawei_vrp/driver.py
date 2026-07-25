@@ -37,6 +37,7 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
         enable_password: str = "",
         timeout: int = 30,
         ssh_connection: SSHConnection | None = None,
+        auto_add_host_key: bool = False,
     ) -> None:
         self.host = host
         self.port = port
@@ -58,6 +59,7 @@ class HuaweiVRPDriver(NetworkDeviceDriver):
                 timeout=timeout,
                 device_type="",
                 enable_password=enable_password,
+                auto_add_host_key=auto_add_host_key,
             )
             self._ssh_connection = _create_ssh_connection(ssh_config)
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from minince.infrastructure.database.models import ConfigTask, TaskStep
 from minince.infrastructure.repositories.base import BaseRepository
@@ -98,6 +99,66 @@ class TaskRepository(BaseRepository):
         self.refresh(task)
         return task
 
+    def try_acquire_task(
+        self,
+        task_id: int,
+        expected_status: str,
+        new_status: str,
+        locked_by: str = "system",
+    ) -> tuple[bool, str | None]:
+        """原子抢占任务，防止并发执行。
+
+        通过条件 UPDATE 实现乐观锁：仅当任务状态和版本号匹配时才更新。
+        受影响行数为 1 表示抢占成功，为 0 表示任务已被其他执行器抢占。
+
+        Args:
+            task_id: 任务 ID
+            expected_status: 期望的当前状态（如 DRAFT/FAILED）
+            new_status: 抢占后的新状态（如 VALIDATING）
+            locked_by: 抢占者标识
+
+        Returns:
+            (success, execution_token) 元组
+        """
+        token = str(uuid.uuid4())
+        now = datetime.utcnow()
+
+        # 先读取当前任务获取 version
+        task = self.get_by_id(task_id)
+        if task is None:
+            return False, None
+
+        # 条件更新：状态匹配 + 版本号匹配
+        stmt = (
+            update(ConfigTask)
+            .where(
+                ConfigTask.id == task_id,
+                ConfigTask.status == expected_status,
+                ConfigTask.version == task.version,
+            )
+            .values(
+                status=new_status,
+                version=task.version + 1,
+                execution_token=token,
+                locked_at=now,
+                locked_by=locked_by,
+                updated_at=now,
+            )
+        )
+        result = self.db.execute(stmt)
+        self.commit()
+
+        if result.rowcount == 1:
+            return True, token
+        return False, None
+
+    def verify_execution_token(self, task_id: int, token: str) -> bool:
+        """验证执行令牌是否属于当前任务。"""
+        task = self.get_by_id(task_id)
+        if task is None:
+            return False
+        return task.execution_token == token
+
     def get_steps_by_task_id(self, task_id: int) -> list[TaskStep]:
         stmt = (
             select(TaskStep)
@@ -108,6 +169,23 @@ class TaskRepository(BaseRepository):
 
     def get_step_by_id(self, step_id: int) -> TaskStep | None:
         stmt = select(TaskStep).where(TaskStep.id == step_id)
+        return self.scalar_one(stmt)
+
+    def get_active_step_by_name(self, task_id: int, step_name: str) -> TaskStep | None:
+        """获取任务中指定名称的最近活动步骤。
+
+        用于步骤生命周期管理：若同名步骤已存在且未终结，则复用而非新建。
+        """
+        stmt = (
+            select(TaskStep)
+            .where(
+                TaskStep.task_id == task_id,
+                TaskStep.step_name == step_name,
+                TaskStep.status.in_(["PENDING", "RUNNING"]),
+            )
+            .order_by(TaskStep.created_at.desc())
+            .limit(1)
+        )
         return self.scalar_one(stmt)
 
     def create_step(
@@ -135,6 +213,7 @@ class TaskRepository(BaseRepository):
         status: str | None = None,
         output_data: dict[str, Any] | None = None,
         error_message: str | None = None,
+        input_data: dict[str, Any] | None = None,
     ) -> TaskStep | None:
         step = self.get_step_by_id(step_id)
         if step is None:
@@ -147,6 +226,8 @@ class TaskRepository(BaseRepository):
             if status in ("SUCCEEDED", "FAILED"):
                 step.completed_at = datetime.utcnow()
 
+        if input_data is not None:
+            step.input_data = input_data
         if output_data is not None:
             step.output_data = output_data
         if error_message is not None:

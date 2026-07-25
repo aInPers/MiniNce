@@ -15,10 +15,18 @@ class ParamikoSSHConnection:
     - 处理分页（---- More ----）
     - 去除命令回显
     - 支持 screen-length 0 禁用分页
+
+    安全说明：
+    - 默认使用 RejectPolicy 拒绝未知主机密钥
+    - 仅在 SSHConfig.auto_add_host_key=True 时使用 AutoAddPolicy
+    - 不再无条件自动回答 Y/N 提示，仅对 save 命令的确认回复 y
     """
 
     # 匹配华为 VRP 提示符：<hostname> 或 [hostname]
     _PROMPT_RE = re.compile(r"[<\[][^<>\[\]]+[>\]]\s*$")
+
+    # 允许自动回复 Y/N 的安全命令白名单（仅 save 类命令）
+    _SAFE_CONFIRM_COMMANDS = {"save", "save force"}
 
     def __init__(self, config: SSHConfig) -> None:
         self.config = config
@@ -26,6 +34,8 @@ class ParamikoSSHConnection:
         self._client: Any = None
         self._shell: Any = None
         self._hostname: str = ""
+        # 记录最后发送的命令，用于判断 Y/N 提示是否为安全命令的确认
+        self._last_command: str = ""
 
     @property
     def is_connected(self) -> bool:
@@ -35,7 +45,14 @@ class ParamikoSSHConnection:
         import paramiko
 
         self._client = paramiko.SSHClient()
-        self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        # 根据配置选择主机密钥策略
+        if self.config.auto_add_host_key:
+            # 仅在显式开启首次发现模式时自动接受主机密钥
+            self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        else:
+            # 默认拒绝未知主机密钥，防止中间人攻击
+            self._client.set_missing_host_key_policy(paramiko.RejectPolicy())
 
         self._client.connect(
             hostname=self.config.host,
@@ -82,6 +99,7 @@ class ParamikoSSHConnection:
             raise ConnectionError("Not connected")
 
         timeout = read_timeout or self.config.timeout
+        self._last_command = command.strip()
         self._shell.send(command + "\n")
         output = self._read_until_prompt(timeout=timeout)
 
@@ -130,6 +148,7 @@ class ParamikoSSHConnection:
         """读取输出直到遇到设备提示符。
 
         自动处理分页（---- More ----）和用户确认（Y/N）。
+        Y/N 确认仅对 save 类安全命令自动回复，其他命令的确认提示将保留在输出中。
         """
         output = ""
         start_time = time.time()
@@ -146,11 +165,17 @@ class ParamikoSSHConnection:
                     output = output.replace("---- More ----", "").replace("----More----", "")
                     continue
 
-                # 处理确认提示：自动回复 y
+                # 处理确认提示：仅对安全命令（save）自动回复 y
                 lower_out = output.lower()
                 if "(y/n)" in lower_out or "[y/n]" in lower_out or "[y]:" in lower_out:
-                    self._shell.send("y\n")
-                    continue
+                    if self._last_command in self._SAFE_CONFIRM_COMMANDS:
+                        # save 命令的确认提示，安全回复 y
+                        self._shell.send("y\n")
+                        output = output.replace("(y/n)", "").replace("[y/n]", "").replace("[y]:", "")
+                        continue
+                    # 非安全命令的确认提示，不自动回复，保留在输出中供业务层处理
+                    # 跳出循环，让调用方看到确认提示
+                    break
 
                 # 检查是否已经收到提示符
                 lines = output.strip().split("\n")
