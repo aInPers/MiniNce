@@ -1,16 +1,16 @@
 @echo off
 REM ============================================================
-REM MiniNCE °²È«Æô¶¯½Å±¾
+REM MiniNCE å®‰å…¨å¯åŠ¨è„šæœ¬
 REM ------------------------------------------------------------
-REM °²È«Ä¬ÈÏ£º
-REM   - ENVIRONMENT=production£¨Ç¿ÖÆÐ£Ñé¼ÓÃÜÃÜÔ¿¡¢¹Ø±Õ Debug¡¢°ó¶¨ 127.0.0.1£©
-REM   - ×Ô¶¯Éú³É Fernet ¼ÓÃÜÃÜÔ¿£¨Ê×´ÎÆô¶¯ÇÒ .env È±Ê§Ê±£©
-REM   - ×Ô¶¯Ó¦ÓÃ Alembic Êý¾Ý¿âÇ¨ÒÆ
-REM   - ²»»á×Ô¶¯½ÓÊÜ SSH Ö÷»úÃÜÔ¿£¨Á¬½ÓÕæÊµÉè±¸Ê±ÐèÏÈ·¢ÏÖ²¢È·ÈÏÖ¸ÎÆ£©
+REM å®‰å…¨é»˜è®¤ï¼š
+REM   - ENVIRONMENT=productionï¼ˆå¼ºåˆ¶æ ¡éªŒåŠ å¯†å¯†é’¥ã€å…³é—­ Debugã€ç»‘å®š 127.0.0.1ï¼‰
+REM   - è‡ªåŠ¨ç”Ÿæˆ Fernet åŠ å¯†å¯†é’¥ï¼ˆé€šè¿‡ Python è„šæœ¬ä»¥ UTF-8 å†™å…¥ .envï¼‰
+REM   - è‡ªåŠ¨åº”ç”¨ Alembic æ•°æ®åº“è¿ç§»
+REM   - ä¸ä¼šè‡ªåŠ¨æŽ¥å— SSH ä¸»æœºå¯†é’¥ï¼ˆè¿žæŽ¥çœŸå®žè®¾å¤‡æ—¶éœ€å…ˆå‘çŽ°å¹¶ç¡®è®¤æŒ‡çº¹ï¼‰
 REM ------------------------------------------------------------
-REM ÓÃ·¨£º
-REM   start.bat              Ê¹ÓÃ production »·¾³Æô¶¯£¨ÍÆ¼ö£©
-REM   start.bat dev          Ê¹ÓÃ development »·¾³Æô¶¯£¨¿ª·Å Debug£©
+REM ç”¨æ³•ï¼š
+REM   start.bat              ä½¿ç”¨ production çŽ¯å¢ƒå¯åŠ¨ï¼ˆæŽ¨èï¼‰
+REM   start.bat dev          ä½¿ç”¨ development çŽ¯å¢ƒå¯åŠ¨ï¼ˆå¼€æ”¾ Debugï¼‰
 REM ============================================================
 
 setlocal EnableDelayedExpansion
@@ -18,31 +18,31 @@ setlocal EnableDelayedExpansion
 set "APP_DIR=%~dp0"
 cd /d "%APP_DIR%"
 
-REM ---- ½âÎö²ÎÊý£ºdev/development ÆôÓÃ¿ª·¢Ä£Ê½ ----
+REM ---- è§£æžå‚æ•°ï¼šdev/development å¯ç”¨å¼€å‘æ¨¡å¼ ----
 set "RUN_ENV=production"
 if /i "%~1"=="dev" set "RUN_ENV=development"
 if /i "%~1"=="development" set "RUN_ENV=development"
 
-echo [1/5] MiniNCE Æô¶¯½Å±¾ (environment=%RUN_ENV%)
+echo [1/5] MiniNCE å¯åŠ¨è„šæœ¬ (environment=%RUN_ENV%)
 
-REM ---- ¼ì²é Python 3 ----
+REM ---- æ£€æŸ¥ Python 3 ----
 where py >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Î´ÕÒµ½ py Æô¶¯Æ÷£¬Çë°²×° Python 3 ²¢È·±£ py ÃüÁî¿ÉÓÃ¡£
+    echo [ERROR] æœªæ‰¾åˆ° py å¯åŠ¨å™¨ï¼Œè¯·å®‰è£… Python 3 å¹¶ç¡®ä¿ py å‘½ä»¤å¯ç”¨ã€‚
     exit /b 1
 )
 
 py -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] ÐèÒª Python 3.12 »ò¸ü¸ß°æ±¾¡£
+    echo [ERROR] éœ€è¦ Python 3.12 æˆ–æ›´é«˜ç‰ˆæœ¬ã€‚
     py --version
     exit /b 1
 )
 
-echo       Python: 
+echo       Python:
 py --version
 
-REM ---- ÉèÖÃ»·¾³±äÁ¿£¨ÓÅÏÈ¼¶µÍÓÚÒÑ´æÔÚµÄ .env£© ----
+REM ---- è®¾ç½®çŽ¯å¢ƒå˜é‡ï¼ˆä¼˜å…ˆçº§ä½ŽäºŽå·²å­˜åœ¨çš„ .envï¼‰ ----
 set "ENVIRONMENT=%RUN_ENV%"
 
 if /i "%RUN_ENV%"=="development" (
@@ -52,52 +52,78 @@ if /i "%RUN_ENV%"=="development" (
     set "DEBUG=false"
     set "HOST=127.0.0.1"
 )
+set "PORT=8000"
 
-REM ---- È·±£ .env ´æÔÚ²¢°üº¬ ENCRYPTION_KEY ----
+REM ---- ç¡®ä¿ .env å­˜åœ¨å¹¶åŒ…å«æœ‰æ•ˆ ENCRYPTION_KEY ----
+REM é€šè¿‡ Python è„šæœ¬ä»¥ UTF-8 ç¼–ç å†™å…¥ï¼Œé¿å… PowerShell/CMD ä¸­æ–‡ç³»ç»Ÿç¼–ç é—®é¢˜
 if not exist ".env" (
-    echo [2/5] Ê×´ÎÆô¶¯£ºÉú³É .env ÅäÖÃÎÄ¼þ
-    call :generate_env
+    echo [2/5] é¦–æ¬¡å¯åŠ¨ï¼šç”Ÿæˆ .env é…ç½®æ–‡ä»¶
+    for /f "delims=" %%L in ('py scripts\init_env.py %RUN_ENV% %DEBUG% %HOST% %PORT%') do (
+        set "INIT_RESULT=%%L"
+    )
+    if "!INIT_RESULT:~0,14!"=="GENERATED_KEY=" (
+        echo       å·²ç”Ÿæˆ .env æ–‡ä»¶ï¼ŒENCRYPTION_KEY å·²è‡ªåŠ¨é…ç½®
+    ) else (
+        echo [ERROR] .env ç”Ÿæˆå¤±è´¥ï¼š!INIT_RESULT!
+        exit /b 1
+    )
 ) else (
-    echo [2/5] ¼ì²âµ½ .env ÅäÖÃÎÄ¼þ
-    call :ensure_encryption_key
+    echo [2/5] æ£€æµ‹åˆ° .env é…ç½®æ–‡ä»¶ï¼Œæ£€æŸ¥ ENCRYPTION_KEY
+    for /f "delims=" %%L in ('py scripts\init_env.py --ensure-key') do (
+        set "ENSURE_RESULT=%%L"
+    )
+    if "!ENSURE_RESULT:~0,13!"=="APPENDED_KEY=" (
+        echo       å·²è¡¥å…… ENCRYPTION_KEY åˆ° .env
+    ) else if "!ENSURE_RESULT!"=="NO_CHANGE" (
+        echo       .env é…ç½®å®Œæ•´
+    ) else (
+        echo [WARN] .env å¯èƒ½ç¼–ç æŸåæˆ–ç¼ºå°‘å¯†é’¥ï¼š!ENSURE_RESULT!
+        echo        æ­£åœ¨é‡æ–°ç”Ÿæˆ .env
+        for /f "delims=" %%L in ('py scripts\init_env.py %RUN_ENV% %DEBUG% %HOST% %PORT%') do (
+            set "INIT_RESULT=%%L"
+        )
+        if "!INIT_RESULT:~0,14!"=="GENERATED_KEY=" (
+            echo       å·²é‡æ–°ç”Ÿæˆ .env æ–‡ä»¶
+        )
+    )
 )
 
-REM ---- ¼ÓÔØ .env µ½µ±Ç°½ø³Ì»·¾³£¨¼òµ¥ÊµÏÖ£ºÖðÐÐ½âÎö KEY=VALUE£© ----
+REM ---- åŠ è½½ .env åˆ°å½“å‰è¿›ç¨‹çŽ¯å¢ƒï¼ˆä»…è¦†ç›–æœªåœ¨ç³»ç»ŸçŽ¯å¢ƒå˜é‡ä¸­è®¾ç½®çš„é¡¹ï¼‰ ----
 call :load_dotenv
 
-REM ---- Í¬²½ ENVIRONMENT ÓëÃüÁîÐÐ²ÎÊý ----
+REM ---- åŒæ­¥ ENVIRONMENT ä¸Žå‘½ä»¤è¡Œå‚æ•° ----
 if /i "%RUN_ENV%"=="development" (
     set "ENVIRONMENT=development"
 ) else (
     set "ENVIRONMENT=production"
 )
 
-REM ---- °²×°ÒÀÀµ£¨ÈôÎ´°²×°£© ----
-echo [3/5] ¼ì²éÏîÄ¿ÒÀÀµ
+REM ---- å®‰è£…ä¾èµ–ï¼ˆè‹¥æœªå®‰è£…ï¼‰ ----
+echo [3/5] æ£€æŸ¥é¡¹ç›®ä¾èµ–
 py -c "import minince" >nul 2>&1
 if errorlevel 1 (
-    echo       Î´¼ì²âµ½ minince °ü£¬Ö´ÐÐ pip install -e .
+    echo       æœªæ£€æµ‹åˆ° minince åŒ…ï¼Œæ‰§è¡Œ pip install -e .
     py -m pip install -e . >nul
     if errorlevel 1 (
-        echo [ERROR] ÒÀÀµ°²×°Ê§°Ü¡£
+        echo [ERROR] ä¾èµ–å®‰è£…å¤±è´¥ã€‚
         exit /b 1
     )
 ) else (
-    echo       ÒÀÀµÒÑ°²×°
+    echo       ä¾èµ–å·²å®‰è£…
 )
 
-REM ---- Ó¦ÓÃÊý¾Ý¿âÇ¨ÒÆ ----
-echo [4/5] Ó¦ÓÃ Alembic Êý¾Ý¿âÇ¨ÒÆ
+REM ---- åº”ç”¨æ•°æ®åº“è¿ç§» ----
+echo [4/5] åº”ç”¨ Alembic æ•°æ®åº“è¿ç§»
 py -m alembic upgrade head
 if errorlevel 1 (
-    echo [ERROR] Êý¾Ý¿âÇ¨ÒÆÊ§°Ü£¬Çë¼ì²é migrations/ Ä¿Â¼¡£
+    echo [ERROR] æ•°æ®åº“è¿ç§»å¤±è´¥ï¼Œè¯·æ£€æŸ¥ migrations/ ç›®å½•ã€‚
     exit /b 1
 )
 
-REM ---- Æô¶¯·þÎñ ----
-echo [5/5] Æô¶¯ MiniNCE ·þÎñ
-echo       ·ÃÎÊµØÖ·: http://%HOST%:%PORT%
-echo       °´ Ctrl+C Í£Ö¹·þÎñ
+REM ---- å¯åŠ¨æœåŠ¡ ----
+echo [5/5] å¯åŠ¨ MiniNCE æœåŠ¡
+echo       è®¿é—®åœ°å€: http://%HOST%:%PORT%
+echo       æŒ‰ Ctrl+C åœæ­¢æœåŠ¡
 echo.
 
 py -m uvicorn minince.main:app --host %HOST% --port %PORT%
@@ -105,75 +131,11 @@ goto :eof
 
 
 REM ============================================================
-REM ×Ó³ÌÐò£ºÉú³É³õÊ¼ .env ÎÄ¼þ
-REM ============================================================
-:generate_env
-REM Éú³É Fernet ÃÜÔ¿
-set "KEY_LINE="
-for /f "delims=" %%K in ('py -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"') do (
-    set "KEY_LINE=%%K"
-)
-
-if "%KEY_LINE%"=="" (
-    echo [ERROR] ÎÞ·¨Éú³É¼ÓÃÜÃÜÔ¿£¬ÇëÈ·ÈÏ cryptography ÒÑ°²×°¡£
-    exit /b 1
-)
-
-> ".env" (
-    echo # MiniNCE ×Ô¶¯Éú³ÉµÄ»·¾³ÅäÖÃ
-    echo # Éú³ÉÊ±¼ä: %DATE% %TIME%
-    echo # ÇëÍ×ÉÆ±£¹Ü ENCRYPTION_KEY£¬¶ªÊ§ºó½«ÎÞ·¨½âÃÜÒÑ±£´æµÄÉè±¸ÃÜÂë
-    echo.
-    echo ENVIRONMENT=%RUN_ENV%
-    echo DEBUG=%DEBUG%
-    echo HOST=%HOST%
-    echo PORT=8000
-    echo.
-    echo DATABASE_URL=sqlite:///./minince.db
-    echo.
-    echo LOG_LEVEL=INFO
-    echo LOG_FORMAT=json
-    echo LOG_FILE=logs/minince.log
-    echo.
-    echo ENCRYPTION_KEY=%KEY_LINE%
-    echo.
-    echo SSH_TIMEOUT=30
-    echo SSH_PORT=22
-)
-echo       ÒÑÉú³É .env ÎÄ¼þ£¬ENCRYPTION_KEY ÒÑ×Ô¶¯ÅäÖÃ
-goto :eof
-
-
-REM ============================================================
-REM ×Ó³ÌÐò£ºÈô .env È±ÉÙ ENCRYPTION_KEY Ôò²¹È«
-REM ============================================================
-:ensure_encryption_key
-findstr /b /c:"ENCRYPTION_KEY=" .env >nul
-if not errorlevel 1 (
-    REM ÒÑ´æÔÚ ENCRYPTION_KEY ÐÐ£¬µ«Ðè¼ì²éÊÇ·ñÎª¿Õ»òÕ¼Î»·û
-    for /f "tokens=2 delims==" %%V in ('findstr /b /c:"ENCRYPTION_KEY=" .env') do (
-        set "EXISTING_KEY=%%V"
-    )
-    if "!EXISTING_KEY!"=="" goto :append_key
-    if /i "!EXISTING_KEY!"=="your-encryption-key-here" goto :append_key
-    goto :eof
-)
-:append_key
-echo [WARN] .env È±ÉÙÓÐÐ§µÄ ENCRYPTION_KEY£¬ÕýÔÚ²¹³ä...
-set "KEY_LINE="
-for /f "delims=" %%K in ('py -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"') do (
-    set "KEY_LINE=%%K"
-)
->> ".env" echo ENCRYPTION_KEY=%KEY_LINE%
-echo       ÒÑ²¹³ä ENCRYPTION_KEY µ½ .env
-goto :eof
-
-
-REM ============================================================
-REM ×Ó³ÌÐò£º¼ÓÔØ .env ÎÄ¼þµ½µ±Ç°»·¾³
-REM ½ö¸²¸ÇÎ´ÔÚÏµÍ³»·¾³±äÁ¿ÖÐÉèÖÃµÄÏî
+REM å­ç¨‹åºï¼šåŠ è½½ .env æ–‡ä»¶åˆ°å½“å‰çŽ¯å¢ƒ
+REM ä»…è¦†ç›–æœªåœ¨ç³»ç»ŸçŽ¯å¢ƒå˜é‡ä¸­è®¾ç½®çš„é¡¹
 REM ============================================================
 :load_dotenv
+if not exist ".env" goto :eof
 for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do (
     if not "%%A"=="" (
         if not defined %%A set "%%A=%%B"
