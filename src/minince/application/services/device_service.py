@@ -5,6 +5,7 @@ from typing import Any
 from minince.infrastructure.repositories.audit_repository import AuditLogRepository
 from minince.infrastructure.repositories.device_repository import DeviceRepository
 from minince.infrastructure.security.encryption import EncryptionManager
+from minince.shared.enums import DeviceType
 from minince.shared.exceptions import DeviceNotFoundError, ValidationError
 
 
@@ -31,6 +32,7 @@ class DeviceService:
         platform: str | None = None,
         connection_type: str = "SSH",
         description: str | None = None,
+        device_type: str = DeviceType.ROUTER.value,
     ) -> Any:
         existing = self._device_repo.get_by_name(name)
         if existing:
@@ -49,6 +51,7 @@ class DeviceService:
             platform=platform,
             connection_type=connection_type,
             description=description,
+            device_type=device_type,
         )
 
         self._audit_repo.log(
@@ -56,7 +59,7 @@ class DeviceService:
             resource_type="DEVICE",
             resource_id=str(device.id),
             actor="web",
-            details={"name": name, "vendor": vendor},
+            details={"name": name, "vendor": vendor, "device_type": device_type},
         )
 
         return device
@@ -136,3 +139,72 @@ class DeviceService:
         devices = self._device_repo.get_all(skip=skip, limit=limit)
         total = self._device_repo.count_all()
         return devices, total
+
+    # ===== 画布用例 =====
+
+    def list_canvas_devices(self) -> list[Any]:
+        """返回已放置到画布上的设备。"""
+        return self._device_repo.get_canvas_devices()
+
+    def list_palette_devices(self) -> list[Any]:
+        """返回未放置到画布上的设备(用于设备列表拖拽)。"""
+        return self._device_repo.get_palette_devices()
+
+    def update_device_position(
+        self, device_id: int, canvas_x: int, canvas_y: int
+    ) -> Any:
+        """更新设备画布坐标，持久化到数据库。"""
+        device = self._device_repo.get_by_id(device_id)
+        if device is None:
+            raise DeviceNotFoundError(device_id)
+
+        updated = self._device_repo.update_position(device_id, canvas_x, canvas_y)
+
+        self._audit_repo.log(
+            action="UPDATE_POSITION",
+            resource_type="DEVICE",
+            resource_id=str(device_id),
+            actor="web",
+            details={"canvas_x": canvas_x, "canvas_y": canvas_y},
+        )
+        return updated
+
+    def remove_from_canvas(self, device_id: int) -> Any:
+        """将设备移出画布(清空坐标)，设备记录保留。"""
+        device = self._device_repo.get_by_id(device_id)
+        if device is None:
+            raise DeviceNotFoundError(device_id)
+
+        updated = self._device_repo.clear_position(device_id)
+
+        self._audit_repo.log(
+            action="REMOVE_FROM_CANVAS",
+            resource_type="DEVICE",
+            resource_id=str(device_id),
+            actor="web",
+            details={"device_name": device.name},
+        )
+        return updated
+
+    def update_device_type(self, device_id: int, device_type: str) -> Any:
+        """更新设备类型(ROUTER/SWITCH)。"""
+        device = self._device_repo.get_by_id(device_id)
+        if device is None:
+            raise DeviceNotFoundError(device_id)
+
+        valid_types = {t.value for t in DeviceType}
+        if device_type not in valid_types:
+            raise ValidationError(
+                f"Invalid device_type '{device_type}', must be one of {valid_types}"
+            )
+
+        updated = self._device_repo.update_device_type(device_id, device_type)
+
+        self._audit_repo.log(
+            action="UPDATE_TYPE",
+            resource_type="DEVICE",
+            resource_id=str(device_id),
+            actor="web",
+            details={"device_type": device_type},
+        )
+        return updated

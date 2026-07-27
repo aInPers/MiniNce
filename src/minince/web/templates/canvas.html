@@ -1,0 +1,615 @@
+{% extends "base.html" %}
+{% block title %}拓扑画布 - MiniNCE{% endblock %}
+{% block extra_head %}
+<style>
+    .canvas-layout {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 18px;
+        min-height: calc(100vh - 140px);
+    }
+    .palette {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color-light);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-card);
+        padding: 18px 18px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+    .palette-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border-color-light);
+    }
+    .palette-header h2 {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    .palette-header .count {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 500;
+    }
+    .palette-list {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-right: 4px;
+    }
+    .palette-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: white;
+        cursor: grab;
+        transition: all 0.15s;
+    }
+    .palette-item:hover {
+        border-color: var(--color-primary);
+        background: var(--color-primary-bg);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
+    }
+    .palette-item:active { cursor: grabbing; }
+    .palette-item.dragging { opacity: 0.4; }
+    .palette-item .pi-icon {
+        width: 30px;
+        height: 30px;
+        border-radius: 7px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .palette-item .pi-icon svg { width: 18px; height: 18px; }
+    .palette-item .pi-info { min-width: 0; flex: 1; }
+    .palette-item .pi-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .palette-item .pi-meta {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-family: var(--font-mono);
+    }
+    .palette-empty {
+        text-align: center;
+        padding: 28px 12px;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+    .palette-empty svg { width: 30px; height: 30px; margin: 0 auto 10px; opacity: 0.5; }
+
+    .canvas-wrap {
+        position: relative;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color-light);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-card);
+        overflow: hidden;
+        min-height: 0;
+    }
+    .canvas-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border-color-light);
+        background: var(--bg-card);
+    }
+    .canvas-toolbar h2 {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .canvas-toolbar .legend {
+        display: flex;
+        gap: 14px;
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+    .legend-dot.router { background: #2563eb; }
+    .legend-dot.switch { background: #7c3aed; }
+
+    .canvas {
+        position: relative;
+        width: 100%;
+        height: calc(100vh - 230px);
+        min-height: 420px;
+        background-color: #f8fafc;
+        background-image:
+            radial-gradient(circle, #cbd5e1 1px, transparent 1px);
+        background-size: 22px 22px;
+        overflow: hidden;
+    }
+    .canvas.drag-over {
+        background-color: var(--color-primary-bg);
+        box-shadow: inset 0 0 0 2px var(--color-primary-border);
+    }
+
+    .node {
+        position: absolute;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        cursor: grab;
+        user-select: none;
+        z-index: 2;
+        padding: 6px;
+        border-radius: 10px;
+        transition: box-shadow 0.15s, transform 0.1s;
+    }
+    .node:hover { z-index: 3; }
+    .node:active { cursor: grabbing; }
+    .node.dragging { z-index: 10; opacity: 0.85; }
+    .node.selected { box-shadow: 0 0 0 2px var(--color-primary); }
+
+    .node-icon {
+        width: 56px;
+        height: 56px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        box-shadow: var(--shadow-card);
+        position: relative;
+        transition: transform 0.15s;
+    }
+    .node:hover .node-icon { transform: translateY(-2px); }
+    .node-icon svg { width: 32px; height: 32px; }
+    .node-icon.router { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); }
+    .node-icon.switch { background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%); }
+
+    .node-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+        background: white;
+        padding: 2px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--border-color-light);
+        white-space: nowrap;
+        max-width: 120px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .node-ip {
+        font-size: 10px;
+        font-family: var(--font-mono);
+        color: var(--text-muted);
+    }
+
+    .node-actions {
+        position: absolute;
+        top: -10px;
+        right: -10px;
+        display: none;
+        gap: 4px;
+    }
+    .node:hover .node-actions { display: flex; }
+    .node-btn {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        border: 1px solid white;
+        background: var(--text-primary);
+        color: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        transition: all 0.15s;
+    }
+    .node-btn:hover { transform: scale(1.12); }
+    .node-btn.del { background: var(--color-danger); }
+    .node-btn.type { background: var(--color-info); }
+    .node-btn svg { width: 12px; height: 12px; }
+
+    .canvas-empty {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: var(--text-muted);
+        pointer-events: none;
+    }
+    .canvas-empty .ce-icon {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 14px;
+        background: white;
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: var(--shadow-card);
+        color: var(--text-muted);
+    }
+    .canvas-empty .ce-icon svg { width: 30px; height: 30px; }
+    .canvas-empty p { font-size: 14px; font-weight: 500; color: var(--text-secondary); }
+    .canvas-empty .hint { font-size: 12.5px; margin-top: 4px; }
+
+    .toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%) translateY(20px);
+        background: var(--text-primary);
+        color: white;
+        padding: 10px 18px;
+        border-radius: var(--radius-sm);
+        font-size: 13px;
+        font-weight: 500;
+        box-shadow: 0 8px 24px rgba(15,23,42,0.25);
+        opacity: 0;
+        transition: all 0.25s;
+        z-index: 1000;
+        pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.error { background: var(--color-danger); }
+    .toast.success { background: var(--color-success); }
+
+    @media (max-width: 900px) {
+        .canvas-layout { grid-template-columns: 1fr; }
+        .palette { max-height: 240px; }
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>拓扑画布</h1>
+    <div class="subtitle">从左侧设备列表拖出设备到画布，可拖动调整位置、切换类型、移出画布，变更自动保存到数据库</div>
+</div>
+
+<div class="canvas-layout">
+    <aside class="palette">
+        <div class="palette-header">
+            <h2>设备列表</h2>
+            <span class="count" id="palette-count">{{ palette_devices|length }} 台</span>
+        </div>
+        <div class="palette-list" id="palette-list">
+            {% if palette_devices %}
+                {% for device in palette_devices %}
+                <div class="palette-item" draggable="true"
+                     data-id="{{ device.id }}"
+                     data-name="{{ device.name }}"
+                     data-ip="{{ device.management_ip }}"
+                     data-vendor="{{ device.vendor }}"
+                     data-type="{{ device.device_type }}">
+                    <div class="pi-icon {{ 'router' if device.device_type == 'ROUTER' else 'switch' }}"
+                         style="background: {% if device.device_type == 'ROUTER' %}#dbeafe;color:#2563eb{% else %}#ede9fe;color:#7c3aed{% endif %}">
+                        {% if device.device_type == 'ROUTER' %}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                        {% else %}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="2"/><line x1="6" y1="17" x2="6" y2="20"/><line x1="10" y1="17" x2="10" y2="20"/><line x1="14" y1="17" x2="14" y2="20"/><line x1="18" y1="17" x2="18" y2="20"/></svg>
+                        {% endif %}
+                    </div>
+                    <div class="pi-info">
+                        <div class="pi-name">{{ device.name }}</div>
+                        <div class="pi-meta">{{ device.management_ip }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="palette-empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg>
+                    <div>所有设备已在画布上</div>
+                </div>
+            {% endif %}
+        </div>
+    </aside>
+
+    <section class="canvas-wrap">
+        <div class="canvas-toolbar">
+            <h2>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                画布
+            </h2>
+            <div class="legend">
+                <div class="legend-item"><span class="legend-dot router"></span>路由器</div>
+                <div class="legend-item"><span class="legend-dot switch"></span>交换机</div>
+            </div>
+        </div>
+        <div class="canvas" id="canvas">
+            <div class="canvas-empty" id="canvas-empty">
+                <div class="ce-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="4"/></svg>
+                </div>
+                <p>画布为空</p>
+                <p class="hint">从左侧拖拽设备到此处开始布局</p>
+            </div>
+            {% for device in canvas_devices %}
+            <div class="node" draggable="true"
+                 data-id="{{ device.id }}"
+                 data-type="{{ device.device_type }}"
+                 style="left: {{ device.canvas_x }}px; top: {{ device.canvas_y }}px;">
+                <div class="node-icon {{ 'router' if device.device_type == 'ROUTER' else 'switch' }}">
+                    {% if device.device_type == 'ROUTER' %}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                    {% else %}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="2"/><line x1="6" y1="17" x2="6" y2="20"/><line x1="10" y1="17" x2="10" y2="20"/><line x1="14" y1="17" x2="14" y2="20"/><line x1="18" y1="17" x2="18" y2="20"/></svg>
+                    {% endif %}
+                </div>
+                <div class="node-name">{{ device.name }}</div>
+                <div class="node-ip">{{ device.management_ip }}</div>
+                <div class="node-actions">
+                    <button class="node-btn type" title="切换路由器/交换机" data-action="toggle-type">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                    </button>
+                    <button class="node-btn del" title="移出画布" data-action="remove">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+
+<div class="toast" id="toast"></div>
+{% endblock %}
+{% block extra_script %}
+<script>
+(function () {
+    const canvas = document.getElementById('canvas');
+    const canvasEmpty = document.getElementById('canvas-empty');
+    const paletteList = document.getElementById('palette-list');
+    const paletteCount = document.getElementById('palette-count');
+    const toast = document.getElementById('toast');
+
+    let dragState = null; // {id, mode: 'palette'|'canvas', offsetX, offsetY}
+
+    function showToast(msg, kind) {
+        toast.textContent = msg;
+        toast.className = 'toast show' + (kind ? ' ' + kind : '');
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(() => { toast.className = 'toast'; }, 2200);
+    }
+
+    function updateEmptyState() {
+        const nodes = canvas.querySelectorAll('.node');
+        canvasEmpty.style.display = nodes.length === 0 ? 'block' : 'none';
+    }
+
+    function nodeIconSvg(type) {
+        if (type === 'ROUTER') {
+            return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>';
+        }
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="2"/><line x1="6" y1="17" x2="6" y2="20"/><line x1="10" y1="17" x2="10" y2="20"/><line x1="14" y1="17" x2="14" y2="20"/><line x1="18" y1="17" x2="18" y2="20"/></svg>';
+    }
+
+    function createNode(device) {
+        const node = document.createElement('div');
+        node.className = 'node';
+        node.draggable = true;
+        node.dataset.id = device.id;
+        node.dataset.type = device.device_type;
+        node.style.left = device.canvas_x + 'px';
+        node.style.top = device.canvas_y + 'px';
+        const iconClass = device.device_type === 'ROUTER' ? 'router' : 'switch';
+        node.innerHTML =
+            '<div class="node-icon ' + iconClass + '">' + nodeIconSvg(device.device_type) + '</div>' +
+            '<div class="node-name"></div>' +
+            '<div class="node-ip"></div>' +
+            '<div class="node-actions">' +
+                '<button class="node-btn type" title="切换路由器/交换机" data-action="toggle-type"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></button>' +
+                '<button class="node-btn del" title="移出画布" data-action="remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>' +
+            '</div>';
+        node.querySelector('.node-name').textContent = device.name;
+        node.querySelector('.node-ip').textContent = device.management_ip;
+        bindNodeEvents(node);
+        return node;
+    }
+
+    function createPaletteItem(device) {
+        const item = document.createElement('div');
+        item.className = 'palette-item';
+        item.draggable = true;
+        item.dataset.id = device.id;
+        item.dataset.name = device.name;
+        item.dataset.ip = device.management_ip;
+        item.dataset.vendor = device.vendor;
+        item.dataset.type = device.device_type;
+        const isRouter = device.device_type === 'ROUTER';
+        const bg = isRouter ? 'background:#dbeafe;color:#2563eb' : 'background:#ede9fe;color:#7c3aed';
+        item.innerHTML =
+            '<div class="pi-icon ' + (isRouter ? 'router' : 'switch') + '" style="' + bg + '">' + nodeIconSvg(device.device_type) + '</div>' +
+            '<div class="pi-info"><div class="pi-name"></div><div class="pi-meta"></div></div>';
+        item.querySelector('.pi-name').textContent = device.name;
+        item.querySelector('.pi-meta').textContent = device.management_ip;
+        item.addEventListener('dragstart', (e) => {
+            dragState = { id: device.id, mode: 'palette', offsetX: 28, offsetY: 28 };
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('text/plain', String(device.id));
+            item.classList.add('dragging');
+        });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            dragState = null;
+        });
+        return item;
+    }
+
+    function refreshPaletteCount() {
+        const n = paletteList.querySelectorAll('.palette-item').length;
+        paletteCount.textContent = n + ' 台';
+        const empty = paletteList.querySelector('.palette-empty');
+        if (n === 0 && !empty) {
+            const div = document.createElement('div');
+            div.className = 'palette-empty';
+            div.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg><div>所有设备已在画布上</div>';
+            paletteList.appendChild(div);
+        } else if (n > 0) {
+            const empty = paletteList.querySelector('.palette-empty');
+            if (empty) empty.remove();
+        }
+    }
+
+    function bindNodeEvents(node) {
+        node.addEventListener('dragstart', (e) => {
+            const rect = node.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+            dragState = {
+                id: parseInt(node.dataset.id, 10),
+                mode: 'canvas',
+                offsetX: e.clientX - rect.left,
+                offsetY: e.clientY - rect.top,
+            };
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', String(node.dataset.id));
+            setTimeout(() => node.classList.add('dragging'), 0);
+        });
+        node.addEventListener('dragend', () => {
+            node.classList.remove('dragging');
+            dragState = null;
+        });
+
+        // 动作按钮
+        node.querySelector('[data-action="remove"]').addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeFromCanvas(parseInt(node.dataset.id, 10), node);
+        });
+        node.querySelector('[data-action="toggle-type"]').addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleType(parseInt(node.dataset.id, 10), node);
+        });
+    }
+
+    // 画布接收拖拽
+    canvas.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = dragState && dragState.mode === 'canvas' ? 'move' : 'copy';
+        canvas.classList.add('drag-over');
+    });
+    canvas.addEventListener('dragleave', (e) => {
+        if (e.target === canvas) canvas.classList.remove('drag-over');
+    });
+    canvas.addEventListener('drop', (e) => {
+        e.preventDefault();
+        canvas.classList.remove('drag-over');
+        if (!dragState) return;
+        const canvasRect = canvas.getBoundingClientRect();
+        const x = Math.max(0, Math.round(e.clientX - canvasRect.left - dragState.offsetX));
+        const y = Math.max(0, Math.round(e.clientY - canvasRect.top - dragState.offsetY));
+
+        if (dragState.mode === 'palette') {
+            placeOnCanvas(dragState.id, x, y);
+        } else {
+            moveNode(dragState.id, x, y);
+        }
+    });
+
+    async function placeOnCanvas(deviceId, x, y) {
+        try {
+            const res = await fetch('/canvas/api/devices/' + deviceId + '/position', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ canvas_x: x, canvas_y: y }),
+            });
+            if (!res.ok) throw new Error('放置失败');
+            const data = await res.json();
+            // 从 palette 移除
+            const pItem = paletteList.querySelector('.palette-item[data-id="' + deviceId + '"]');
+            if (pItem) pItem.remove();
+            refreshPaletteCount();
+            // 添加到画布
+            const node = createNode(data.device);
+            canvas.appendChild(node);
+            updateEmptyState();
+            showToast('已放置到画布', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    async function moveNode(deviceId, x, y) {
+        const node = canvas.querySelector('.node[data-id="' + deviceId + '"]');
+        if (node) {
+            node.style.left = x + 'px';
+            node.style.top = y + 'px';
+        }
+        try {
+            const res = await fetch('/canvas/api/devices/' + deviceId + '/position', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ canvas_x: x, canvas_y: y }),
+            });
+            if (!res.ok) throw new Error('位置保存失败');
+            showToast('位置已保存', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    async function removeFromCanvas(deviceId, node) {
+        try {
+            const res = await fetch('/canvas/api/devices/' + deviceId + '/remove', {
+                method: 'POST',
+            });
+            if (!res.ok) throw new Error('移出失败');
+            const data = await res.json();
+            // 从画布移除节点
+            node.remove();
+            updateEmptyState();
+            // 添加回 palette
+            const item = createPaletteItem(data.device);
+            paletteList.appendChild(item);
+            refreshPaletteCount();
+            showToast('已移出画布', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    async function toggleType(deviceId, node) {
+        const current = node.dataset.type;
+        const next = current === 'ROUTER' ? 'SWITCH' : 'ROUTER';
+        try {
+            const res = await fetch('/canvas/api/devices/' + deviceId + '/type', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ device_type: next }),
+            });
+            if (!res.ok) throw new Error('类型切换失败');
+            // 更新节点图标
+            node.dataset.type = next;
+            const icon = node.querySelector('.node-icon');
+            icon.className = 'node-icon ' + (next === 'ROUTER' ? 'router' : 'switch');
+            icon.innerHTML = nodeIconSvg(next);
+            showToast('已切换为' + (next === 'ROUTER' ? '路由器' : '交换机'), 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    // 初始化已有节点事件
+    canvas.querySelectorAll('.node').forEach(bindNodeEvents);
+    updateEmptyState();
+})();
+</script>
+{% endblock %}

@@ -56,6 +56,13 @@ class DeviceStatus(StrEnum):
     MAINTENANCE = "MAINTENANCE"
 
 
+class DeviceType(StrEnum):
+    """设备类型：用于画布图标区分与拓扑展示。"""
+
+    ROUTER = "ROUTER"
+    SWITCH = "SWITCH"
+
+
 class DeviceVendor(StrEnum):
     HUAWEI = "HUAWEI"
     CISCO = "CISCO"

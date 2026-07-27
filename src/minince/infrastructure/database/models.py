@@ -39,6 +39,13 @@ class Device(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(50), default="INACTIVE")
     last_connected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 设备类型：路由器/交换机，用于画布图标区分
+    device_type: Mapped[str] = mapped_column(
+        String(50), default="ROUTER", server_default="ROUTER", nullable=False
+    )
+    # 画布坐标：为空表示未放置到画布
+    canvas_x: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    canvas_y: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ConfigTask(Base, TimestampMixin):

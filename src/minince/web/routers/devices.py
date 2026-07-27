@@ -94,6 +94,7 @@ async def device_create(
             platform=form.get("platform") or None,
             connection_type=form.get("connection_type", "SSH"),
             description=form.get("description") or None,
+            device_type=form.get("device_type", "ROUTER"),
         )
         return RedirectResponse(url="/devices", status_code=303)
     except ValidationError as e:
@@ -158,7 +159,7 @@ async def device_update(
     form = await request.form()
     service = _create_service(db)
     update_data: dict[str, str] = {}
-    for field in ["name", "hostname", "management_ip", "password", "username", "vendor", "platform", "connection_type", "description"]:
+    for field in ["name", "hostname", "management_ip", "password", "username", "vendor", "platform", "connection_type", "description", "device_type"]:
         val = form.get(field)
         if val is not None and val != "":
             update_data[field] = str(val)
