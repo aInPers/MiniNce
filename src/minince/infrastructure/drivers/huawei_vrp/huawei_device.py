@@ -435,6 +435,46 @@ class HuaweiDevice(NetworkDevice):
     # ------------------------------------------------------------------
     # 内部辅助：状态获取
     # ------------------------------------------------------------------
+    def _query_vlan_config(self, vlan_id: int) -> dict[str, Any]:
+        """查询 VLAN 的实际配置（name/description），从 current-configuration 获取。
+
+        真实设备的 ``display vlan X`` 不包含 name/description 字段，
+        必须通过 ``display current-configuration`` 或 VLAN 视图下的
+        ``display this`` 才能获取。
+        """
+        config_raw = self._query(
+            f"display current-configuration | section vlan {vlan_id}"
+        )
+        if not config_raw or "Error" in config_raw:
+            self._send("system-view")
+            self._send(f"vlan {vlan_id}")
+            config_raw = self._send("display this")
+            self._send("quit")
+            self._send("return")
+
+        vlan_section = re.search(
+            rf"vlan\s+{vlan_id}\b(.*?)(?=\n\s*vlan\s+\d|\n#|\ninterface\s|\nreturn|\Z)",
+            config_raw,
+            re.DOTALL,
+        )
+        section_text = vlan_section.group(1) if vlan_section else config_raw
+
+        name = ""
+        name_match = re.search(r"^\s*name\s+(\S+)", section_text, re.MULTILINE)
+        if name_match:
+            name = name_match.group(1)
+
+        desc = ""
+        desc_match = re.search(r"^\s*description\s+(.+)", section_text, re.MULTILINE)
+        if desc_match:
+            desc = desc_match.group(1).strip()
+
+        return {
+            "name": name,
+            "description": desc,
+            "config_raw": config_raw,
+        }
+
     def _get_vlan_state(self, intent: dict[str, Any]) -> CurrentState:
         """获取 VLAN 当前状态。"""
         vlan_id = intent.get("vlan_id", 0)
@@ -443,20 +483,11 @@ class HuaweiDevice(NetworkDevice):
         if not output or "Error" in output:
             return CurrentState(feature="VLAN", exists=False, data={})
 
-        # 解析 name 和 description（兼容 mock 与真实设备输出）
-        name: str | None = None
-        name_match = re.search(r"(?:VLAN\s+)?Name\s*:\s*(\S+)", output, re.IGNORECASE)
-        if name_match:
-            name = name_match.group(1)
-        if not name:
-            name_match = re.search(r"^\s*name\s+(\S+)", output, re.MULTILINE)
-            if name_match:
-                name = name_match.group(1)
-
-        desc: str | None = None
-        desc_match = re.search(r"Description\s*:\s*(.+)", output, re.IGNORECASE)
-        if desc_match:
-            desc = desc_match.group(1).strip()
+        # 从实际配置中解析 name 和 description
+        # （display vlan X 在真实设备上不含 name/description）
+        vlan_cfg = self._query_vlan_config(vlan_id)
+        name: str | None = vlan_cfg["name"] or None
+        desc: str | None = vlan_cfg["description"] or None
 
         # 检测是否关联 Vlanif 三层接口
         has_vlanif = False
@@ -545,32 +576,10 @@ class HuaweiDevice(NetworkDevice):
             )
 
         # 尝试 | section 获取详细配置，失败时回退到 display this
-        config_raw = self._query(
-            f"display current-configuration | section vlan {vlan_id}"
-        )
-        if not config_raw or "Error" in config_raw:
-            self._send("system-view")
-            self._send(f"vlan {vlan_id}")
-            config_raw = self._send("display this")
-            self._send("quit")
-            self._send("return")
-
-        # 从配置段中解析特定 VLAN 的 name 和 description
-        actual_name = ""
-        actual_desc = ""
-        vlan_section = re.search(
-            rf"vlan\s+{vlan_id}\b(.*?)(?=\n\s*vlan\s+\d|\n#|\ninterface\s|\nreturn|\Z)",
-            config_raw,
-            re.DOTALL,
-        )
-        section_text = vlan_section.group(1) if vlan_section else config_raw
-
-        name_match = re.search(r"^\s*name\s+(\S+)", section_text, re.MULTILINE)
-        if name_match:
-            actual_name = name_match.group(1)
-        desc_match = re.search(r"^\s*description\s+(.+)", section_text, re.MULTILINE)
-        if desc_match:
-            actual_desc = desc_match.group(1).strip()
+        vlan_cfg = self._query_vlan_config(vlan_id)
+        actual_name = vlan_cfg["name"]
+        actual_desc = vlan_cfg["description"]
+        config_raw = vlan_cfg["config_raw"]
 
         success = True
         expected_name = intent.get("name")

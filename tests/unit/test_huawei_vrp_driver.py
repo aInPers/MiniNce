@@ -551,3 +551,131 @@ class TestApplyPlanRollback:
         assert result.success is True
         state_after = self.driver.get_current_state(intent)
         assert state_after.exists is True
+
+
+class RealDeviceSimulatingSSHConnection:
+    """模拟真实设备 SSH 连接：display vlan X 不含 Name/Description 字段。
+
+    真实华为设备（AR 路由器）的 ``display vlan X`` 输出仅包含 VID/Status/Type
+    等字段，不包含 Name 和 Description。name/description 只能通过
+    ``display current-configuration`` 或 ``display this`` 获取。
+    """
+
+    def __init__(self, config: SSHConfig) -> None:
+        self._inner = MockSSHConnection(config)
+
+    @property
+    def is_connected(self) -> bool:
+        return self._inner.is_connected
+
+    def connect(self) -> None:
+        self._inner.connect()
+
+    def disconnect(self) -> None:
+        self._inner.disconnect()
+
+    def send_command(self, command: str, read_timeout: int | None = None) -> str:
+        cmd = command.strip()
+        # 真实设备 display vlan X 不含 Name/Description
+        if cmd.startswith("display vlan ") and not cmd.startswith("display vlan batch"):
+            vlan_id = cmd.split()[2]
+            # 先用 mock 查 VLAN 是否存在
+            mock_output = self._inner.send_command(command, read_timeout)
+            if "Error" in mock_output:
+                return mock_output
+            # 返回真实设备格式：只有 VID/Status，没有 Name/Description
+            return f"VID: {vlan_id}\nStatus: enable\nType: common\n"
+        return self._inner.send_command(command, read_timeout)
+
+    def send_config_set(self, config_commands: list[str]) -> str:
+        return self._inner.send_config_set(config_commands)
+
+    def send_command_timing(self, command: str) -> str:
+        return self._inner.send_command_timing(command)
+
+    def save_config(self) -> str:
+        return self._inner.save_config()
+
+    def __enter__(self) -> RealDeviceSimulatingSSHConnection:
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.disconnect()
+
+
+class TestRealDeviceVlanQuery:
+    """真实设备场景下 VLAN 状态查询测试。
+
+    验证当 ``display vlan X`` 不含 Name/Description 时，
+    _get_vlan_state 仍能通过 current-configuration 正确获取。
+    """
+
+    def setup_method(self) -> None:
+        config = SSHConfig(host="mock:192.168.1.1", port=22, username="admin", password="test")
+        ssh_conn = RealDeviceSimulatingSSHConnection(config)
+        self.driver = HuaweiDevice(
+            host="mock:192.168.1.1", port=22, username="admin", password="test",
+            ssh_connection=ssh_conn,
+        )
+        self.driver.connect(ConnectionType.SSH)
+
+    def test_get_state_returns_name_from_config(self) -> None:
+        """display vlan X 不含 Name，但 current-configuration 含 name。"""
+        intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 555,
+            "name": "REAL_DEVICE_TEST",
+            "description": "real device desc",
+            "device_id": 1,
+        }
+        state = self.driver.get_current_state(intent)
+        plan = self.driver.build_plan(intent, state)
+        result = self.driver.apply_plan(plan)
+        assert result.success is True
+
+        # 查询状态——即使 display vlan X 不含 Name/Description
+        state_after = self.driver.get_current_state(intent)
+        assert state_after.exists is True
+        assert state_after.data["name"] == "REAL_DEVICE_TEST"
+        assert state_after.data["description"] == "real device desc"
+
+    def test_verify_succeeds_with_real_device_output(self) -> None:
+        """验证在真实设备输出格式下仍能正确验证。"""
+        intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 666,
+            "name": "VERIFY_TEST",
+            "description": "verify desc",
+            "device_id": 1,
+        }
+        state = self.driver.get_current_state(intent)
+        plan = self.driver.build_plan(intent, state)
+        self.driver.apply_plan(plan)
+
+        result = self.driver.verify(intent)
+        assert result.success is True
+        assert result.details["actual_name"] == "VERIFY_TEST"
+        assert result.details["actual_description"] == "verify desc"
+
+    def test_idempotent_with_real_device_output(self) -> None:
+        """幂等检查：配置已正确时不应生成变更命令。"""
+        intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 777,
+            "name": "IDEMPOTENT",
+            "description": "idempotent desc",
+            "device_id": 1,
+        }
+        # 第一次创建
+        state = self.driver.get_current_state(intent)
+        plan = self.driver.build_plan(intent, state)
+        self.driver.apply_plan(plan)
+
+        # 第二次查询——应识别为已配置，无需变更
+        state2 = self.driver.get_current_state(intent)
+        plan2 = self.driver.build_plan(intent, state2)
+        assert plan2.changed is False
