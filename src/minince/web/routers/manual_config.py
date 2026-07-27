@@ -131,8 +131,54 @@ async def terminal_websocket(websocket: WebSocket, device_id: int) -> None:
             width=200,
             height=50,
         )
+    except paramiko.AuthenticationException as e:
+        await _safe_send_text(
+            websocket,
+            f"\r\nSSH 认证失败: {e}\r\n"
+            f"  设备: {ssh_config.host}:{ssh_config.port}\r\n"
+            f"  用户名: {ssh_config.username}\r\n"
+            f"请检查设备管理中该设备的用户名与密码是否正确。\r\n",
+        )
+        await _safe_close(websocket)
+        db.close()
+        return
+    except paramiko.BadHostKeyException as e:
+        await _safe_send_text(
+            websocket,
+            f"\r\nSSH 主机密钥不匹配: {e}\r\n"
+            f"  设备: {ssh_config.host}:{ssh_config.port}\r\n"
+            f"可能设备重装或被中间人攻击，请核查后重试。\r\n",
+        )
+        await _safe_close(websocket)
+        db.close()
+        return
+    except paramiko.SSHException as e:
+        await _safe_send_text(
+            websocket,
+            f"\r\nSSH 协议错误: {e}\r\n"
+            f"  设备: {ssh_config.host}:{ssh_config.port}\r\n"
+            f"  异常类型: {type(e).__name__}\r\n"
+            f"可能原因：算法协商失败、网络中断或设备拒绝连接。\r\n",
+        )
+        await _safe_close(websocket)
+        db.close()
+        return
+    except OSError as e:
+        await _safe_send_text(
+            websocket,
+            f"\r\n网络连接失败: {e}\r\n"
+            f"  设备: {ssh_config.host}:{ssh_config.port}\r\n"
+            f"请检查设备是否在线、IP 是否可达、端口是否开放。\r\n",
+        )
+        await _safe_close(websocket)
+        db.close()
+        return
     except Exception as e:
-        await _safe_send_text(websocket, f"\r\nSSH 连接失败: {e}\r\n")
+        await _safe_send_text(
+            websocket,
+            f"\r\nSSH 连接失败（未知错误）: {e}\r\n"
+            f"  异常类型: {type(e).__name__}\r\n",
+        )
         await _safe_close(websocket)
         db.close()
         return

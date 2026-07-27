@@ -307,6 +307,22 @@
             }
         });
 
+        // 华为 VRP 期望 Backspace 发送 \x08 (BS) 而非 xterm 默认的 \x7f (DEL)
+        // Delete 键发送 \x1b[3~ 多数 VRP 版本不支持，统一回退为 BS
+        term.attachCustomKeyEventHandler(function(ev) {
+            if (ev.type !== 'keydown') return true;
+            if (!ws || ws.readyState !== WebSocket.OPEN) return true;
+            if (ev.key === 'Backspace') {
+                ws.send('\b');
+                return false;
+            }
+            if (ev.key === 'Delete') {
+                ws.send('\b');
+                return false;
+            }
+            return true;
+        });
+
         term.onResize(function(size) {
             // 仅作记录，不向设备发送 resize 信号
         });

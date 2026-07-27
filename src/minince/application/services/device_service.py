@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from minince.infrastructure.drivers import get_driver
 from minince.infrastructure.repositories.audit_repository import AuditLogRepository
 from minince.infrastructure.repositories.device_repository import DeviceRepository
 from minince.infrastructure.security.encryption import EncryptionManager
-from minince.shared.enums import DeviceType
-from minince.shared.exceptions import DeviceNotFoundError, ValidationError
+from minince.shared.enums import ConnectionType, DeviceType
+from minince.shared.exceptions import (
+    DeviceConnectionError,
+    DeviceNotFoundError,
+    EncryptionError,
+    ValidationError,
+)
 
 
 class DeviceService:
@@ -110,6 +116,12 @@ class DeviceService:
         return result
 
     def test_connection(self, device_id: int) -> dict[str, Any]:
+        """对设备执行真实 SSH 连接测试。
+
+        通过驱动注册表获取对应厂商驱动，使用设备存储的凭据发起真实
+        SSH 连接，并根据结果更新设备状态与最后连接时间。测试完成后
+        立即断开连接，避免占用设备并发连接数。
+        """
         device = self._device_repo.get_by_id(device_id)
         if device is None:
             raise DeviceNotFoundError(device_id)
@@ -121,11 +133,53 @@ class DeviceService:
             actor="web",
         )
 
-        return {
-            "success": True,
-            "message": f"Connection test for {device.name} (simulated)",
-            "device_id": device_id,
-        }
+        # 解密设备凭据
+        try:
+            password = self._encryption.decrypt(device.encrypted_password)
+        except EncryptionError as e:
+            self._device_repo.update_status(device_id, "ERROR")
+            return {
+                "success": False,
+                "message": f"凭据解密失败: {e}",
+                "device_id": device_id,
+                "error_type": "DECRYPT_ERROR",
+            }
+
+        # 通过驱动注册表获取对应厂商驱动
+        try:
+            driver = get_driver(
+                device.vendor,
+                host=device.management_ip,
+                port=device.port,
+                username=device.username,
+                password=password,
+            )
+        except DeviceConnectionError as e:
+            self._device_repo.update_status(device_id, "ERROR")
+            return {
+                "success": False,
+                "message": str(e),
+                "device_id": device_id,
+                "error_type": "NO_DRIVER",
+            }
+
+        # 执行真实连接测试，完成后立即断开
+        try:
+            result = driver.connect(ConnectionType.SSH)
+            if result.success:
+                self._device_repo.update_status(device_id, "ACTIVE")
+                self._device_repo.update_last_connected(device_id)
+            else:
+                self._device_repo.update_status(device_id, "ERROR")
+            return {
+                "success": result.success,
+                "message": result.message,
+                "device_id": device_id,
+                "response_time_ms": result.response_time_ms,
+                "error_type": result.error_type,
+            }
+        finally:
+            driver.disconnect()
 
     def get_device(self, device_id: int) -> Any:
         device = self._device_repo.get_by_id(device_id)
