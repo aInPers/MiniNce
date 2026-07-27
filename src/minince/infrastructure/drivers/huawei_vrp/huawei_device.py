@@ -385,7 +385,7 @@ class HuaweiDevice(NetworkDevice):
         )
 
     def apply_plan(self, plan: ConfigPlan) -> ExecutionResult:
-        """在设备上执行配置计划。"""
+        """在设备上执行配置计划，途中失败则逆序回滚已执行成功的命令。"""
         if not self._ensure_connected():
             return ExecutionResult(success=False, error_message="SSH connection failed")
 
@@ -393,6 +393,7 @@ class HuaweiDevice(NetworkDevice):
             return ExecutionResult(success=True, command_outputs=[])
 
         command_outputs: list[dict[str, Any]] = []
+        executed: list[str] = []
 
         self._send("system-view")
         try:
@@ -400,11 +401,16 @@ class HuaweiDevice(NetworkDevice):
                 output = self._send(cmd)
                 command_outputs.append({"command": cmd, "output": output})
                 if self._is_error(output):
+                    # 失败：退出当前视图回到系统视图，逆序回滚已执行成功的命令
+                    self._send("return")
+                    self._send("system-view")
+                    self._rollback(executed)
                     return ExecutionResult(
                         success=False,
                         command_outputs=command_outputs,
                         error_message=f"Command failed: {cmd.strip()}",
                     )
+                executed.append(cmd)
         finally:
             self._send("return")
 

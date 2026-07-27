@@ -194,10 +194,5 @@ class ParamikoSSHConnection:
                         break
             else:
                 time.sleep(0.1)
-                # 如果已经有输出且没有新数据，再等一会
-                if output:
-                    time.sleep(0.3)
-                    if not self._shell.recv_ready():
-                        break
 
         return output

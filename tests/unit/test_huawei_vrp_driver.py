@@ -440,3 +440,114 @@ class TestVlanConfigReadbackFallback:
         assert result.success is False
         assert "config_raw" in result.details
         assert "vlan 203" in result.details["config_raw"]
+
+
+class FailureSimulatingSSHConnection:
+    """模拟特定命令失败的 SSH 连接。
+
+    包装 MockSSHConnection，对 name 命令返回错误，用于测试回滚逻辑。
+    """
+
+    def __init__(self, config: SSHConfig) -> None:
+        self._inner = MockSSHConnection(config)
+
+    @property
+    def is_connected(self) -> bool:
+        return self._inner.is_connected
+
+    def connect(self) -> None:
+        self._inner.connect()
+
+    def disconnect(self) -> None:
+        self._inner.disconnect()
+
+    def send_command(self, command: str, read_timeout: int | None = None) -> str:
+        cmd = command.strip()
+        # 模拟 name 命令在真实设备上失败（如设备不支持该命令或视图不对）
+        if cmd.startswith("name "):
+            return "Error: Unrecognized command found at '^' position."
+        return self._inner.send_command(command, read_timeout)
+
+    def send_config_set(self, config_commands: list[str]) -> str:
+        return self._inner.send_config_set(config_commands)
+
+    def send_command_timing(self, command: str) -> str:
+        return self._inner.send_command_timing(command)
+
+    def save_config(self) -> str:
+        return self._inner.save_config()
+
+    def __enter__(self) -> FailureSimulatingSSHConnection:
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.disconnect()
+
+
+class TestApplyPlanRollback:
+    """apply_plan 失败时回滚测试。"""
+
+    def setup_method(self) -> None:
+        config = SSHConfig(host="mock:192.168.1.1", port=22, username="admin", password="test")
+        ssh_conn = FailureSimulatingSSHConnection(config)
+        self.driver = HuaweiDevice(
+            host="mock:192.168.1.1", port=22, username="admin", password="test",
+            ssh_connection=ssh_conn,
+        )
+        self.driver.connect(ConnectionType.SSH)
+
+    def test_rollback_on_command_failure(self) -> None:
+        """name 命令失败后，已创建的 VLAN 应被回滚（undo vlan）删除。"""
+        intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 777,
+            "name": "testName",
+            "device_id": 1,
+        }
+        state = self.driver.get_current_state(intent)
+        plan = self.driver.build_plan(intent, state)
+        result = self.driver.apply_plan(plan)
+
+        # apply_plan 应返回失败
+        assert result.success is False
+        assert "name testName" in (result.error_message or "")
+
+        # 回滚后 VLAN 不应存在
+        state_after = self.driver.get_current_state(intent)
+        assert state_after.exists is False
+
+    def test_rollback_does_not_save_config(self) -> None:
+        """回滚时不应保存配置到设备。"""
+        intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 888,
+            "name": "testName",
+            "device_id": 1,
+        }
+        state = self.driver.get_current_state(intent)
+        plan = self.driver.build_plan(intent, state)
+        result = self.driver.apply_plan(plan)
+
+        assert result.success is False
+        # VLAN 应被回滚
+        state_after = self.driver.get_current_state(intent)
+        assert state_after.exists is False
+
+    def test_successful_plan_not_affected_by_rollback(self) -> None:
+        """无 name 命令的 VLAN 创建应成功，不受回滚逻辑影响。"""
+        intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 999,
+            "device_id": 1,
+        }
+        state = self.driver.get_current_state(intent)
+        plan = self.driver.build_plan(intent, state)
+        result = self.driver.apply_plan(plan)
+
+        assert result.success is True
+        state_after = self.driver.get_current_state(intent)
+        assert state_after.exists is True
