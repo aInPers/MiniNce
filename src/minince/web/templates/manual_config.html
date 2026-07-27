@@ -1,94 +1,414 @@
 {% extends "base.html" %}
 {% block title %}手动配置 - MiniNCE{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+<style>
+    .terminal-page {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .terminal-toolbar {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color-light);
+        border-radius: var(--radius-lg);
+        padding: 14px 18px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        box-shadow: var(--shadow-card);
+    }
+
+    .terminal-toolbar .form-group {
+        margin-bottom: 0;
+        flex: 1;
+        min-width: 240px;
+    }
+
+    .terminal-toolbar .form-group select {
+        padding: 8px 12px;
+    }
+
+    .terminal-toolbar .btn {
+        white-space: nowrap;
+    }
+
+    .terminal-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12.5px;
+        font-weight: 500;
+        padding: 4px 10px;
+        border-radius: 20px;
+    }
+
+    .terminal-status .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+    }
+
+    .terminal-status.idle {
+        background: #f1f5f9;
+        color: #475569;
+    }
+    .terminal-status.idle .dot { background: #94a3b8; }
+
+    .terminal-status.connecting {
+        background: var(--color-warning-bg);
+        color: var(--color-warning);
+    }
+    .terminal-status.connecting .dot {
+        background: #d97706;
+        animation: pulse-amber 1.5s infinite;
+    }
+
+    .terminal-status.connected {
+        background: var(--color-success-bg);
+        color: var(--color-success);
+    }
+    .terminal-status.connected .dot {
+        background: var(--color-success);
+        animation: pulse 2s infinite;
+    }
+
+    .terminal-status.error {
+        background: var(--color-danger-bg);
+        color: var(--color-danger);
+    }
+    .terminal-status.error .dot { background: var(--color-danger); }
+
+    .terminal-container {
+        background: var(--bg-code);
+        border-radius: var(--radius-lg);
+        padding: 16px;
+        border: 1px solid #1e293b;
+        box-shadow: var(--shadow-card);
+        position: relative;
+        min-height: 520px;
+    }
+
+    .terminal-container::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 32px;
+        background: #1e293b;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        background-image: radial-gradient(circle, #f87171 5px, transparent 6px),
+                          radial-gradient(circle, #fbbf24 5px, transparent 6px),
+                          radial-gradient(circle, #34d399 5px, transparent 6px);
+        background-position: 14px 12px, 32px 12px, 50px 12px;
+        background-repeat: no-repeat;
+        background-size: 10px 10px;
+    }
+
+    .terminal-container .terminal-title {
+        position: absolute;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #94a3b8;
+        font-size: 11px;
+        font-family: var(--font-mono);
+        z-index: 1;
+        pointer-events: none;
+    }
+
+    .terminal-wrap {
+        padding-top: 32px;
+        height: 520px;
+    }
+
+    .terminal-empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: #64748b;
+        font-size: 13.5px;
+        text-align: center;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .terminal-empty svg {
+        width: 36px;
+        height: 36px;
+        opacity: 0.6;
+    }
+
+    .terminal-hint {
+        background: var(--color-info-bg);
+        border: 1px solid #bfdbfe;
+        color: #1e40af;
+        padding: 11px 14px;
+        border-radius: var(--radius-sm);
+        font-size: 12.5px;
+        line-height: 1.6;
+    }
+
+    .terminal-hint code {
+        background: white;
+        padding: 1px 5px;
+        font-size: 12px;
+    }
+
+    #terminal { height: 100%; }
+
+    .terminal-toolbar .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
     <h1>手动配置</h1>
-    <div class="subtitle">通过 SSH 直接向设备下发命令</div>
+    <div class="subtitle">交互式 SSH 终端 - 像直接连接设备一样实时输入输出</div>
 </div>
 
-{% if error %}
-<div class="error-message">{{ error }}</div>
-{% endif %}
-
-<div class="card">
-    <div class="card-header">
-        <h2>命令执行</h2>
-    </div>
-    <form method="post" action="/manual-config">
+<div class="terminal-page">
+    <div class="terminal-toolbar">
         <div class="form-group">
             <label for="device_id">选择设备</label>
-            <select name="device_id" id="device_id" required>
+            <select id="device_id" {% if devices|length == 0 %}disabled{% endif %}>
                 <option value="">-- 请选择设备 --</option>
                 {% for device in devices %}
-                <option value="{{ device.id }}" {% if selected_device_id == device.id %}selected{% endif %}>
+                <option value="{{ device.id }}"
+                        data-mock="{{ 'true' if device.management_ip.startswith('mock:') else 'false' }}">
                     {{ device.name }} ({{ device.management_ip }}:{{ device.port }})
                 </option>
                 {% endfor %}
             </select>
         </div>
+        <button type="button" id="connect-btn" class="btn btn-primary" {% if devices|length == 0 %}disabled{% endif %}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            连接
+        </button>
+        <button type="button" id="disconnect-btn" class="btn btn-danger" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            断开
+        </button>
+        <span id="status-badge" class="terminal-status idle">
+            <span class="dot"></span>
+            <span id="status-text">未连接</span>
+        </span>
+    </div>
 
-        <div class="form-group">
-            <label for="commands">配置命令</label>
-            <textarea name="commands" id="commands" rows="12" placeholder="每行一条命令，以 # 开头的行会被忽略&#10;示例：&#10;system-view&#10;interface Vlanif 100&#10;ip address 192.168.100.1 24&#10;quit&#10;return">{{ commands_text or '' }}</textarea>
-            <div class="form-hint">命令将原样发送到设备，用户需自行控制视图切换（system-view / quit / return 等）</div>
-        </div>
+    <div class="terminal-hint">
+        提示：连接后会建立到设备的 SSH 交互式 shell，输入命令即时返回。Mock 设备不支持交互式终端。如需保存配置请在终端内输入 <code>save</code>。
+    </div>
 
-        <div class="form-group">
-            <label for="created_by">操作人</label>
-            <input type="text" name="created_by" id="created_by" value="web" placeholder="操作人标识">
-        </div>
-
-        <div class="form-group">
-            <div class="checkbox-group">
-                <input type="checkbox" name="save_config" id="save_config" {% if save_config %}checked{% endif %}>
-                <label for="save_config">执行后保存配置到设备 (save force)</label>
+    <div class="terminal-container">
+        <div class="terminal-title" id="terminal-title">SSH Terminal</div>
+        <div class="terminal-wrap">
+            <div id="terminal-empty" class="terminal-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="4 17 10 11 4 5"/>
+                    <line x1="12" y1="19" x2="20" y2="19"/>
+                </svg>
+                <div>选择设备并点击「连接」开始交互式终端</div>
             </div>
+            <div id="terminal" style="display:none;"></div>
         </div>
-
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                执行命令
-            </button>
-            <a href="/manual-config" class="btn btn-secondary">清空</a>
-        </div>
-    </form>
-</div>
-
-{% if results is defined and results %}
-<div class="card">
-    <div class="card-header">
-        <h2>执行结果</h2>
-        <span class="count">{{ results | length }} 条命令</span>
     </div>
-
-    {% for result in results %}
-    <div style="margin-bottom: 16px;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-            <span class="mono" style="font-weight: 600; color: var(--text-primary);">{{ result.command }}</span>
-            {% if result.status == "ok" %}
-            <span class="status-badge status-SUCCEEDED">成功</span>
-            {% else %}
-            <span class="status-badge status-FAILED">失败</span>
-            {% endif %}
-        </div>
-        {% if result.output %}
-        <pre class="command-output">{{ result.output }}</pre>
-        {% else %}
-        <div class="info-box no-border" style="color: var(--text-muted); font-size: 13px;">（无输出）</div>
-        {% endif %}
-    </div>
-    {% endfor %}
 </div>
-{% endif %}
+{% endblock %}
 
-{% if devices is defined and devices|length == 0 %}
-<div class="empty-state">
-    <div class="icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-    </div>
-    <p>暂无设备</p>
-    <p class="hint">请先<a href="/devices/new" style="color: var(--color-primary);">添加设备</a>再进行手动配置</p>
-</div>
-{% endif %}
+{% block extra_script %}
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script>
+(function() {
+    const deviceSelect = document.getElementById('device_id');
+    const connectBtn = document.getElementById('connect-btn');
+    const disconnectBtn = document.getElementById('disconnect-btn');
+    const statusBadge = document.getElementById('status-badge');
+    const statusText = document.getElementById('status-text');
+    const terminalEmpty = document.getElementById('terminal-empty');
+    const terminalEl = document.getElementById('terminal');
+    const terminalTitle = document.getElementById('terminal-title');
+
+    let term = null;
+    let fitAddon = null;
+    let ws = null;
+
+    function setStatus(state, text) {
+        statusBadge.className = 'terminal-status ' + state;
+        statusText.textContent = text;
+    }
+
+    function setButtons(connected) {
+        connectBtn.disabled = connected;
+        disconnectBtn.disabled = !connected;
+        deviceSelect.disabled = connected;
+    }
+
+    function showTerminal(show) {
+        terminalEmpty.style.display = show ? 'none' : 'flex';
+        terminalEl.style.display = show ? 'block' : 'none';
+    }
+
+    function getWsUrl(deviceId) {
+        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        return `${proto}://${window.location.host}/manual-config/ws/${deviceId}`;
+    }
+
+    function initTerminal() {
+        if (term) {
+            term.dispose();
+        }
+        term = new Terminal({
+            cursorBlink: true,
+            fontSize: 13,
+            fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+            theme: {
+                background: '#0f172a',
+                foreground: '#e2e8f0',
+                cursor: '#94a3b8',
+                selectionBackground: 'rgba(13, 148, 136, 0.35)',
+                black: '#0f172a',
+                red: '#f87171',
+                green: '#34d399',
+                yellow: '#fbbf24',
+                blue: '#60a5fa',
+                magenta: '#c084fc',
+                cyan: '#22d3ee',
+                white: '#e2e8f0',
+                brightBlack: '#475569',
+                brightRed: '#fca5a5',
+                brightGreen: '#6ee7b7',
+                brightYellow: '#fde68a',
+                brightBlue: '#93c5fd',
+                brightMagenta: '#d8b4fe',
+                brightCyan: '#67e8f9',
+                brightWhite: '#f8fafc'
+            },
+            scrollback: 5000,
+            convertEol: false,
+            allowProposedApi: true
+        });
+        fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(terminalEl);
+        try { fitAddon.fit(); } catch (e) {}
+
+        term.onData(function(data) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(data);
+            }
+        });
+
+        term.onResize(function(size) {
+            // 仅作记录，不向设备发送 resize 信号
+        });
+
+        window.addEventListener('resize', onWindowResize);
+    }
+
+    function onWindowResize() {
+        if (fitAddon) {
+            try { fitAddon.fit(); } catch (e) {}
+        }
+    }
+
+    function connect() {
+        const deviceId = deviceSelect.value;
+        if (!deviceId) {
+            alert('请先选择设备');
+            return;
+        }
+
+        const opt = deviceSelect.options[deviceSelect.selectedIndex];
+        if (opt && opt.dataset.mock === 'true') {
+            alert('Mock 设备不支持交互式终端，请选择真实 IP 设备');
+            return;
+        }
+
+        const deviceLabel = opt ? opt.textContent : '';
+        terminalTitle.textContent = `SSH Terminal - ${deviceLabel}`;
+        setStatus('connecting', '连接中...');
+        setButtons(true);
+        showTerminal(true);
+        initTerminal();
+        term && term.writeln('\x1b[33m正在建立 SSH 连接...\x1b[0m');
+
+        const url = getWsUrl(deviceId);
+        ws = new WebSocket(url);
+        ws.binaryType = 'arraybuffer';
+
+        ws.onopen = function() {
+            setStatus('connected', '已连接');
+            if (term) {
+                term.focus();
+            }
+        };
+
+        ws.onmessage = function(event) {
+            if (!term) return;
+            if (typeof event.data === 'string') {
+                term.write(event.data);
+            } else {
+                const bytes = new Uint8Array(event.data);
+                term.write(bytes);
+            }
+        };
+
+        ws.onerror = function() {
+            setStatus('error', '连接错误');
+            if (term) {
+                term.writeln('\x1b[31mWebSocket 连接发生错误\x1b[0m');
+            }
+        };
+
+        ws.onclose = function() {
+            setStatus('idle', '已断开');
+            setButtons(false);
+            if (term) {
+                term.writeln('\x1b[33m\r\n[连接已关闭]\x1b[0m');
+            }
+            ws = null;
+        };
+    }
+
+    function disconnect() {
+        if (ws) {
+            try { ws.close(); } catch (e) {}
+            ws = null;
+        }
+        setStatus('idle', '已断开');
+        setButtons(false);
+    }
+
+    connectBtn.addEventListener('click', connect);
+    disconnectBtn.addEventListener('click', disconnect);
+
+    // 设备切换时检查 mock
+    deviceSelect.addEventListener('change', function() {
+        const opt = deviceSelect.options[deviceSelect.selectedIndex];
+        if (opt && opt.dataset.mock === 'true') {
+            connectBtn.disabled = true;
+            connectBtn.title = 'Mock 设备不支持交互式终端';
+        } else {
+            connectBtn.disabled = false;
+            connectBtn.title = '';
+        }
+    });
+
+    // Ctrl+D 快捷断开
+    document.addEventListener('keydown', function(e) {
+        if (e.ctrlKey && e.key === 'd' && ws && ws.readyState === WebSocket.OPEN) {
+            // 让 xterm 自己处理 Ctrl+D，由设备侧决定会话是否结束
+        }
+    });
+})();
+</script>
 {% endblock %}
