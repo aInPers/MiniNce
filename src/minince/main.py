@@ -14,6 +14,8 @@ from minince.web.routers.devices import router as devices_router
 from minince.web.routers.manual_config import router as manual_config_router
 from minince.web.routers.ospf import router as ospf_router
 from minince.web.routers.pages import router as pages_router
+from minince.web.routers.template_config import router as template_config_router
+from minince.web.routers.vlan import router as vlan_router
 
 
 def create_app() -> FastAPI:
@@ -41,6 +43,8 @@ def create_app() -> FastAPI:
     app.include_router(manual_config_router)
     app.include_router(backups_router)
     app.include_router(ospf_router)
+    app.include_router(vlan_router)
+    app.include_router(template_config_router)
 
     return app
 

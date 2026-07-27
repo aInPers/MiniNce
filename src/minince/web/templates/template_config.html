@@ -1,0 +1,570 @@
+{% extends "base.html" %}
+
+{% block title %}模板配置 - MiniNCE{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>常用模板配置</h1>
+    <p class="subtitle">通过模板化表单下发 VLAN 与 OSPF 配置命令，支持预览、下发与状态查询</p>
+</div>
+
+<!-- 设备选择 -->
+<div class="card">
+    <div class="card-header">
+        <h2>选择设备</h2>
+    </div>
+    <div class="form-group">
+        <label for="device-select">目标设备</label>
+        <select id="device-select">
+            <option value="">请选择设备...</option>
+            {% for device in devices %}
+            <option value="{{ device.id }}">{{ device.name }} ({{ device.management_ip }})</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div id="device-error" class="error-message" style="display:none;"></div>
+</div>
+
+<!-- Tab 导航 -->
+<div class="card" style="padding-bottom:0;border-bottom:none;">
+    <div class="tab-nav" style="display:flex;gap:4px;border-bottom:1px solid var(--border-color-light);">
+        <button class="tab-btn tab-active" data-tab="vlan" onclick="switchTab('vlan')">VLAN 配置</button>
+        <button class="tab-btn" data-tab="ospf" onclick="switchTab('ospf')">OSPF 配置</button>
+    </div>
+</div>
+
+<!-- ===== VLAN Tab ===== -->
+<div id="tab-vlan" class="tab-panel">
+    <div class="grid-2">
+        <!-- VLAN 表单 -->
+        <div class="card">
+            <div class="card-header">
+                <h2>VLAN 参数</h2>
+            </div>
+            <div class="form-group">
+                <label>操作类型</label>
+                <select id="vlan-operation">
+                    <option value="create">创建 / 修改</option>
+                    <option value="delete">删除</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>VLAN ID <span style="color:var(--color-danger);">*</span></label>
+                <input type="number" id="vlan-id" min="1" max="4094" placeholder="如 100" />
+                <div class="form-hint">取值范围 1 ~ 4094</div>
+            </div>
+            <div class="form-group vlan-create-only">
+                <label>VLAN 名称</label>
+                <input type="text" id="vlan-name" maxlength="32" placeholder="如 MANAGEMENT" />
+            </div>
+            <div class="form-group vlan-create-only">
+                <label>VLAN 描述</label>
+                <input type="text" id="vlan-description" maxlength="255" placeholder="可选描述信息" />
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="vlanPreview()">预览命令</button>
+                <button class="btn btn-primary" onclick="vlanDeploy()">下发配置</button>
+                <button class="btn btn-ghost" onclick="vlanQuery()">查询状态</button>
+            </div>
+        </div>
+
+        <!-- VLAN 结果 -->
+        <div class="card">
+            <div class="card-header">
+                <h2>执行结果</h2>
+            </div>
+            <div id="vlan-result">
+                <div class="empty-state">
+                    <p>尚未执行操作</p>
+                    <div class="hint">选择设备并填写参数后点击按钮</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== OSPF Tab ===== -->
+<div id="tab-ospf" class="tab-panel" style="display:none;">
+    <div class="grid-2">
+        <!-- OSPF 表单 -->
+        <div class="card">
+            <div class="card-header">
+                <h2>OSPF 进程参数</h2>
+            </div>
+            <div class="form-group">
+                <label>操作类型</label>
+                <select id="ospf-operation">
+                    <option value="ensure_present">创建 / 修改</option>
+                    <option value="ensure_absent">删除进程</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>进程 ID <span style="color:var(--color-danger);">*</span></label>
+                <input type="number" id="ospf-process-id" min="1" max="65535" value="1" placeholder="如 1" />
+            </div>
+            <div class="form-group ospf-create-only">
+                <label>Router ID</label>
+                <input type="text" id="ospf-router-id" placeholder="如 10.255.0.1（可选）" />
+            </div>
+
+            <!-- 网段宣告 -->
+            <div class="ospf-create-only">
+                <div class="section-title">网段宣告</div>
+                <div id="ospf-networks-list"></div>
+                <button class="btn btn-secondary btn-sm" onclick="addOspfNetwork()" style="margin-top:8px;">+ 添加网段</button>
+            </div>
+
+            <!-- 接口配置 -->
+            <div class="ospf-create-only" style="margin-top:16px;">
+                <div class="section-title">接口配置</div>
+                <div id="ospf-interfaces-list"></div>
+                <button class="btn btn-secondary btn-sm" onclick="addOspfInterface()" style="margin-top:8px;">+ 添加接口</button>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="ospfPreview()">预览命令</button>
+                <button class="btn btn-primary" onclick="ospfDeploy()">下发配置</button>
+                <button class="btn btn-ghost" onclick="ospfQuery()">查询状态</button>
+            </div>
+        </div>
+
+        <!-- OSPF 结果 -->
+        <div class="card">
+            <div class="card-header">
+                <h2>执行结果</h2>
+            </div>
+            <div id="ospf-result">
+                <div class="empty-state">
+                    <p>尚未执行操作</p>
+                    <div class="hint">选择设备并填写参数后点击按钮</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_script %}
+<style>
+    .tab-btn {
+        padding: 9px 20px;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 13.5px;
+        font-weight: 500;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: all 0.15s;
+        font-family: inherit;
+        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    }
+    .tab-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .tab-btn.tab-active {
+        color: var(--color-primary);
+        border-bottom-color: var(--color-primary);
+        font-weight: 600;
+    }
+    .tab-panel { margin-top: 18px; }
+
+    .ospf-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 8px;
+        margin-bottom: 8px;
+        align-items: end;
+    }
+    .ospf-row input, .ospf-row select {
+        padding: 7px 10px;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        font-size: 12.5px;
+        font-family: inherit;
+    }
+    .ospf-row .btn-remove {
+        padding: 7px 10px;
+        background: var(--color-danger-bg);
+        color: var(--color-danger);
+        border: 1px solid #fecaca;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+    .ospf-row .btn-remove:hover { background: var(--color-danger); color: white; }
+
+    .ospf-iface-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 0.7fr 1fr auto;
+        gap: 6px;
+        margin-bottom: 8px;
+        align-items: end;
+    }
+    .ospf-iface-row input, .ospf-iface-row select {
+        padding: 6px 8px;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        font-family: inherit;
+    }
+    .ospf-iface-row .btn-remove {
+        padding: 6px 8px;
+        background: var(--color-danger-bg);
+        color: var(--color-danger);
+        border: 1px solid #fecaca;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+    .ospf-iface-row .btn-remove:hover { background: var(--color-danger); color: white; }
+
+    .result-section { margin-bottom: 14px; }
+    .result-section h3 {
+        font-size: 12px; font-weight: 600; color: var(--text-muted);
+        text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px;
+    }
+    .result-commands {
+        background: var(--bg-code); color: #e2e8f0;
+        padding: 14px 16px; border-radius: var(--radius);
+        font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65;
+        overflow-x: auto; white-space: pre; border: 1px solid #1e293b;
+    }
+    .result-info {
+        background: var(--bg-page); padding: 10px 14px;
+        border-radius: var(--radius-sm); font-size: 12.5px;
+        font-family: var(--font-mono); line-height: 1.6;
+    }
+    .result-info .key { color: var(--text-muted); }
+    .result-info .val { color: var(--text-primary); font-weight: 500; }
+</style>
+
+<script>
+// ========== Tab 切换 ==========
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+    document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('tab-active');
+    document.getElementById(`tab-${tab}`).style.display = '';
+}
+
+// ========== 通用辅助 ==========
+function getDeviceId() {
+    const id = document.getElementById('device-select').value;
+    if (!id) {
+        const err = document.getElementById('device-error');
+        err.textContent = '请先选择目标设备';
+        err.style.display = 'block';
+        return null;
+    }
+    document.getElementById('device-error').style.display = 'none';
+    return parseInt(id);
+}
+
+function showResult(elementId, html) {
+    document.getElementById(elementId).innerHTML = html;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatCommands(commands) {
+    if (!commands || commands.length === 0) return '<div class="empty-state"><p>无需下发命令</p></div>';
+    return '<pre class="result-commands">' + escapeHtml(commands.join('\n')) + '</pre>';
+}
+
+function formatWarnings(warnings) {
+    if (!warnings || warnings.length === 0) return '';
+    return '<div class="warnings-box"><ul>' +
+        warnings.map(w => '<li>' + escapeHtml(w) + '</li>').join('') +
+        '</ul></div>';
+}
+
+function formatDeployResult(data) {
+    let html = '';
+    const successClass = data.success ? 'alert-success' : 'alert-error';
+    const icon = data.success
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+    html += `<div class="alert ${successClass}">${icon}<div>${escapeHtml(data.message || '')}</div></div>`;
+
+    if (data.commands && data.commands.length > 0) {
+        html += '<div class="result-section"><h3>下发命令</h3>' + formatCommands(data.commands) + '</div>';
+    }
+    if (data.verification) {
+        const vSuccess = data.verification.success;
+        html += `<div class="result-section"><h3>验证结果</h3>` +
+            `<div class="alert ${vSuccess ? 'alert-success' : 'alert-warning'}" style="margin-bottom:0;">` +
+            `验证${vSuccess ? '通过' : '未通过'}</div></div>`;
+        if (data.verification.details) {
+            html += '<div class="result-info" style="margin-top:8px;">' +
+                Object.entries(data.verification.details).map(([k, v]) =>
+                    `<span class="key">${escapeHtml(k)}:</span> <span class="val">${escapeHtml(String(v))}</span>`
+                ).join('<br>') + '</div>';
+        }
+    }
+    return html;
+}
+
+async function apiCall(url, method, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(url, opts);
+    const data = await resp.json();
+    if (!resp.ok) {
+        throw new Error(data.detail || `HTTP ${resp.status}`);
+    }
+    return data;
+}
+
+// ========== VLAN ==========
+function getVlanIntent() {
+    const vlanId = parseInt(document.getElementById('vlan-id').value);
+    if (!vlanId || vlanId < 1 || vlanId > 4094) {
+        return { error: '请填写有效的 VLAN ID（1-4094）' };
+    }
+    const operation = document.getElementById('vlan-operation').value;
+    const intent = { feature: 'VLAN', operation, vlan_id: vlanId };
+    if (operation !== 'delete') {
+        const name = document.getElementById('vlan-name').value.trim();
+        const desc = document.getElementById('vlan-description').value.trim();
+        if (name) intent.name = name;
+        if (desc) intent.description = desc;
+    }
+    return { intent };
+}
+
+async function vlanPreview() {
+    const deviceId = getDeviceId();
+    if (!deviceId) return;
+    const { intent, error } = getVlanIntent();
+    if (error) { showResult('vlan-result', `<div class="alert alert-error">${error}</div>`); return; }
+
+    showResult('vlan-result', '<div class="empty-state"><p>正在生成预览...</p></div>');
+    try {
+        const data = await apiCall(`/api/v1/devices/${deviceId}/vlan/preview`, 'POST', intent);
+        let html = '';
+        if (data.warnings && data.warnings.length) html += formatWarnings(data.warnings);
+        html += `<div class="result-section"><h3>变更状态: ${data.changed ? '需要变更' : '无需变更'}</h3></div>`;
+        html += '<div class="result-section"><h3>预览命令</h3>' + formatCommands(data.commands) + '</div>';
+        if (data.current_state && data.current_state.data) {
+            html += '<div class="result-section"><h3>当前状态</h3><div class="result-info">' +
+                Object.entries(data.current_state.data).map(([k, v]) =>
+                    `<span class="key">${escapeHtml(k)}:</span> <span class="val">${escapeHtml(String(v))}</span>`
+                ).join('<br>') + '</div></div>';
+        }
+        showResult('vlan-result', html);
+    } catch (e) {
+        showResult('vlan-result', `<div class="alert alert-error">${escapeHtml(e.message)}</div>`);
+    }
+}
+
+async function vlanDeploy() {
+    const deviceId = getDeviceId();
+    if (!deviceId) return;
+    const { intent, error } = getVlanIntent();
+    if (error) { showResult('vlan-result', `<div class="alert alert-error">${error}</div>`); return; }
+
+    showResult('vlan-result', '<div class="empty-state"><p>正在下发配置...</p></div>');
+    try {
+        const data = await apiCall(`/api/v1/devices/${deviceId}/vlan/deploy`, 'POST', intent);
+        showResult('vlan-result', formatDeployResult(data));
+    } catch (e) {
+        showResult('vlan-result', `<div class="alert alert-error">${escapeHtml(e.message)}</div>`);
+    }
+}
+
+async function vlanQuery() {
+    const deviceId = getDeviceId();
+    if (!deviceId) return;
+    const vlanId = parseInt(document.getElementById('vlan-id').value);
+    if (!vlanId) { showResult('vlan-result', `<div class="alert alert-error">请填写 VLAN ID</div>`); return; }
+
+    showResult('vlan-result', '<div class="empty-state"><p>正在查询状态...</p></div>');
+    try {
+        const data = await apiCall(`/api/v1/devices/${deviceId}/vlan/state/${vlanId}`, 'GET');
+        let html = `<div class="alert ${data.exists ? 'alert-success' : 'alert-warning'}" style="margin-bottom:12px;">` +
+            `VLAN ${vlanId} ${data.exists ? '存在' : '不存在'}</div>`;
+        if (data.exists && data.data) {
+            html += '<div class="result-section"><h3>详细信息</h3><div class="result-info">' +
+                Object.entries(data.data).map(([k, v]) =>
+                    `<span class="key">${escapeHtml(k)}:</span> <span class="val">${escapeHtml(String(v))}</span>`
+                ).join('<br>') + '</div></div>';
+        }
+        showResult('vlan-result', html);
+    } catch (e) {
+        showResult('vlan-result', `<div class="alert alert-error">${escapeHtml(e.message)}</div>`);
+    }
+}
+
+// VLAN 操作类型切换时隐藏/显示字段
+document.getElementById('vlan-operation').addEventListener('change', function() {
+    const isDelete = this.value === 'delete';
+    document.querySelectorAll('.vlan-create-only').forEach(el => {
+        el.style.display = isDelete ? 'none' : '';
+    });
+});
+
+// ========== OSPF ==========
+function addOspfNetwork(network, area) {
+    const container = document.getElementById('ospf-networks-list');
+    const div = document.createElement('div');
+    div.className = 'ospf-row';
+    div.innerHTML = `
+        <input type="text" placeholder="网段 CIDR 如 10.10.10.0/24" value="${network || ''}" class="ospf-net-cidr" />
+        <input type="text" placeholder="Area ID 如 0.0.0.0" value="${area || '0.0.0.0'}" class="ospf-net-area" />
+        <button class="btn-remove" onclick="this.parentElement.remove()">删除</button>
+    `;
+    container.appendChild(div);
+}
+
+function addOspfInterface(name, area, cost, nt) {
+    const container = document.getElementById('ospf-interfaces-list');
+    const div = document.createElement('div');
+    div.className = 'ospf-iface-row';
+    div.innerHTML = `
+        <input type="text" placeholder="接口名 如 GE0/0/1" value="${name || ''}" class="ospf-if-name" />
+        <input type="text" placeholder="Area ID" value="${area || '0.0.0.0'}" class="ospf-if-area" />
+        <input type="number" placeholder="Cost" value="${cost || ''}" class="ospf-if-cost" min="1" max="65535" />
+        <select class="ospf-if-nt">
+            <option value="">网络类型(可选)</option>
+            <option value="broadcast" ${nt === 'broadcast' ? 'selected' : ''}>Broadcast</option>
+            <option value="p2p" ${nt === 'p2p' ? 'selected' : ''}>P2P</option>
+            <option value="nbma" ${nt === 'nbma' ? 'selected' : ''}>NBMA</option>
+            <option value="p2mp" ${nt === 'p2mp' ? 'selected' : ''}>P2MP</option>
+        </select>
+        <button class="btn-remove" onclick="this.parentElement.remove()">删除</button>
+    `;
+    container.appendChild(div);
+}
+
+function getOspfIntent() {
+    const processId = parseInt(document.getElementById('ospf-process-id').value);
+    if (!processId || processId < 1) {
+        return { error: '请填写有效的进程 ID' };
+    }
+    const operation = document.getElementById('ospf-operation').value;
+    const intent = { feature: 'OSPF', operation, process_id: processId };
+
+    if (operation !== 'ensure_absent') {
+        const rid = document.getElementById('ospf-router-id').value.trim();
+        if (rid) intent.router_id = rid;
+
+        const networks = [];
+        document.querySelectorAll('#ospf-networks-list .ospf-row').forEach(row => {
+            const cidr = row.querySelector('.ospf-net-cidr').value.trim();
+            const area = row.querySelector('.ospf-net-area').value.trim();
+            if (cidr) networks.push({ network: cidr, area_id: area || '0.0.0.0' });
+        });
+        intent.networks = networks;
+
+        const interfaces = [];
+        document.querySelectorAll('#ospf-interfaces-list .ospf-iface-row').forEach(row => {
+            const name = row.querySelector('.ospf-if-name').value.trim();
+            if (!name) return;
+            const iface = {
+                interface_name: name,
+                area_id: row.querySelector('.ospf-if-area').value.trim() || '0.0.0.0',
+            };
+            const cost = row.querySelector('.ospf-if-cost').value.trim();
+            if (cost) iface.cost = parseInt(cost);
+            const nt = row.querySelector('.ospf-if-nt').value;
+            if (nt) iface.network_type = nt;
+            interfaces.push(iface);
+        });
+        intent.interfaces = interfaces;
+    }
+    return { intent };
+}
+
+async function ospfPreview() {
+    const deviceId = getDeviceId();
+    if (!deviceId) return;
+    const { intent, error } = getOspfIntent();
+    if (error) { showResult('ospf-result', `<div class="alert alert-error">${error}</div>`); return; }
+
+    showResult('ospf-result', '<div class="empty-state"><p>正在生成预览...</p></div>');
+    try {
+        const data = await apiCall(`/api/v1/devices/${deviceId}/ospf/preview`, 'POST', intent);
+        let html = '';
+        if (data.warnings && data.warnings.length) html += formatWarnings(data.warnings);
+        html += `<div class="result-section"><h3>变更状态: ${data.changed ? '需要变更' : '无需变更'}</h3></div>`;
+        html += '<div class="result-section"><h3>预览命令</h3>' + formatCommands(data.commands) + '</div>';
+        showResult('ospf-result', html);
+    } catch (e) {
+        showResult('ospf-result', `<div class="alert alert-error">${escapeHtml(e.message)}</div>`);
+    }
+}
+
+async function ospfDeploy() {
+    const deviceId = getDeviceId();
+    if (!deviceId) return;
+    const { intent, error } = getOspfIntent();
+    if (error) { showResult('ospf-result', `<div class="alert alert-error">${error}</div>`); return; }
+
+    showResult('ospf-result', '<div class="empty-state"><p>正在下发配置...</p></div>');
+    try {
+        const data = await apiCall(`/api/v1/devices/${deviceId}/ospf/deploy`, 'POST', intent);
+        showResult('ospf-result', formatDeployResult(data));
+    } catch (e) {
+        showResult('ospf-result', `<div class="alert alert-error">${escapeHtml(e.message)}</div>`);
+    }
+}
+
+async function ospfQuery() {
+    const deviceId = getDeviceId();
+    if (!deviceId) return;
+    const processId = parseInt(document.getElementById('ospf-process-id').value) || 1;
+
+    showResult('ospf-result', '<div class="empty-state"><p>正在查询状态...</p></div>');
+    try {
+        const data = await apiCall(`/api/v1/devices/${deviceId}/ospf/state?process_id=${processId}`, 'GET');
+        let html = `<div class="alert ${data.exists ? 'alert-success' : 'alert-warning'}" style="margin-bottom:12px;">` +
+            `OSPF 进程 ${processId} ${data.exists ? '运行中' : '未运行'}</div>`;
+        if (data.exists && data.state) {
+            const s = data.state;
+            html += '<div class="result-section"><h3>进程信息</h3><div class="result-info">' +
+                `<span class="key">router_id:</span> <span class="val">${escapeHtml(s.router_id || '未设置')}</span><br>` +
+                `<span class="key">silent_interfaces:</span> <span class="val">${escapeHtml(JSON.stringify(s.silent_interfaces || []))}</span>` +
+                '</div></div>';
+            if (s.areas && Object.keys(s.areas).length > 0) {
+                html += '<div class="result-section"><h3>Area 与网段</h3>';
+                for (const [aid, area] of Object.entries(s.areas)) {
+                    html += `<div class="result-info" style="margin-bottom:6px;">` +
+                        `<span class="key">Area ${escapeHtml(aid)}:</span> <span class="val">${escapeHtml(JSON.stringify(area.networks || []))}</span>` +
+                        `</div>`;
+                }
+                html += '</div>';
+            }
+            if (s.interfaces && Object.keys(s.interfaces).length > 0) {
+                html += '<div class="result-section"><h3>接口列表</h3>';
+                for (const [name, iface] of Object.entries(s.interfaces)) {
+                    html += `<div class="result-info" style="margin-bottom:6px;">` +
+                        `<span class="key">${escapeHtml(name)}:</span> <span class="val">area=${escapeHtml(iface.area_id||'')}, cost=${escapeHtml(String(iface.cost||''))}</span>` +
+                        `</div>`;
+                }
+                html += '</div>';
+            }
+        }
+        showResult('ospf-result', html);
+    } catch (e) {
+        showResult('ospf-result', `<div class="alert alert-error">${escapeHtml(e.message)}</div>`);
+    }
+}
+
+// OSPF 操作类型切换
+document.getElementById('ospf-operation').addEventListener('change', function() {
+    const isAbsent = this.value === 'ensure_absent';
+    document.querySelectorAll('.ospf-create-only').forEach(el => {
+        el.style.display = isAbsent ? 'none' : '';
+    });
+});
+
+// 初始化默认行
+addOspfNetwork('', '0.0.0.0');
+</script>
+{% endblock %}

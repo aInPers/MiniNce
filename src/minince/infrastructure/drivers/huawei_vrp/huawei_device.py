@@ -5,8 +5,19 @@ import time
 from typing import Any
 
 from minince.domain.devices.config import DeviceConfig
-from minince.domain.devices.facts import ConnectionResult
+from minince.domain.devices.facts import ConnectionResult, CurrentState, DeviceFacts
 from minince.domain.devices.network_device import NetworkDevice
+from minince.domain.network.config_plan import (
+    ConfigPlan,
+    ExecutionResult,
+    VerificationResult,
+)
+from minince.infrastructure.drivers.huawei_vrp.command_generator import (
+    HuaweiVRPCommandGenerator,
+)
+from minince.infrastructure.drivers.huawei_vrp.ospf_parser import HuaweiOspfParser
+from minince.infrastructure.drivers.huawei_vrp.ospf_renderer import HuaweiOspfRenderer
+from minince.infrastructure.drivers.huawei_vrp.parser import HuaweiVRPParser
 from minince.infrastructure.ssh.base import SSHConfig, SSHConnection
 from minince.shared.enums import ConnectionType, DeviceType
 
@@ -290,6 +301,386 @@ class HuaweiDevice(NetworkDevice):
         except Exception:
             self._connected = False
             return False
+
+    def disconnect(self) -> None:
+        """关闭连接（与 close() 等价，提供统一接口名）。"""
+        self.close()
+
+    # ------------------------------------------------------------------
+    # 设备信息扩展
+    # ------------------------------------------------------------------
+    def get_facts(self) -> DeviceFacts:
+        """获取设备基本信息（厂商、型号、主机名、版本等）。"""
+        vendor = self.get_vendor()
+
+        version_output = self._query("display version")
+        model = self._extract_model(version_output) if version_output else "Unknown"
+
+        firmware_version = ""
+        if version_output:
+            version_match = re.search(
+                r"VRP.*?Version\s+([\w\s\(\)]+?)(?:\n|$)", version_output
+            )
+            if version_match:
+                firmware_version = version_match.group(1).strip()
+
+        hostname = ""
+        config_output = self._query("display current-configuration")
+        if config_output:
+            sysname_match = re.search(
+                r"^sysname\s+(\S+)", config_output, re.MULTILINE
+            )
+            if sysname_match:
+                hostname = sysname_match.group(1)
+
+        return DeviceFacts(
+            hostname=hostname,
+            model=model,
+            firmware_version=firmware_version,
+            vendor=vendor,
+        )
+
+    # ------------------------------------------------------------------
+    # 模板配置：状态获取、计划构建、执行、验证
+    # ------------------------------------------------------------------
+    def get_current_state(self, intent: dict[str, Any]) -> CurrentState:
+        """获取指定特性的当前设备状态。"""
+        feature = intent.get("feature", "").upper()
+
+        if feature == "VLAN":
+            return self._get_vlan_state(intent)
+        if feature == "INTERFACE":
+            return self._get_interface_state(intent)
+        if feature == "OSPF":
+            return self._get_ospf_state(intent)
+        return CurrentState(feature=feature, exists=False, data={})
+
+    def build_plan(
+        self,
+        intent: dict[str, Any],
+        current_state: CurrentState,
+    ) -> ConfigPlan:
+        """构建配置计划。"""
+        feature = intent.get("feature", "").upper()
+
+        if feature == "VLAN":
+            generator = HuaweiVRPCommandGenerator()
+            return generator.generate_vlan_commands(intent, current_state.to_dict())
+        if feature == "INTERFACE":
+            generator = HuaweiVRPCommandGenerator()
+            return generator.generate_interface_commands(
+                intent, current_state.to_dict()
+            )
+        if feature == "OSPF":
+            renderer = HuaweiOspfRenderer()
+            return renderer.generate_commands(intent, current_state.data)
+        return ConfigPlan(
+            device_id=int(intent.get("device_id", 0)),
+            feature=feature,
+            intent=intent,
+            current_state={},
+            commands=[],
+            changed=False,
+            warnings=[f"Unsupported feature: {feature}"],
+        )
+
+    def apply_plan(self, plan: ConfigPlan) -> ExecutionResult:
+        """在设备上执行配置计划。"""
+        if not self._ensure_connected():
+            return ExecutionResult(success=False, error_message="SSH connection failed")
+
+        if not plan.commands:
+            return ExecutionResult(success=True, command_outputs=[])
+
+        command_outputs: list[dict[str, Any]] = []
+
+        self._send("system-view")
+        try:
+            for cmd in plan.commands:
+                output = self._send(cmd)
+                command_outputs.append({"command": cmd, "output": output})
+                if self._is_error(output):
+                    return ExecutionResult(
+                        success=False,
+                        command_outputs=command_outputs,
+                        error_message=f"Command failed: {cmd.strip()}",
+                    )
+        finally:
+            self._send("return")
+
+        self._save_config()
+        return ExecutionResult(success=True, command_outputs=command_outputs)
+
+    def verify(self, intent: dict[str, Any]) -> VerificationResult:
+        """验证配置是否生效。"""
+        feature = intent.get("feature", "").upper()
+
+        if feature == "VLAN":
+            return self._verify_vlan(intent)
+        if feature == "INTERFACE":
+            return self._verify_interface(intent)
+        if feature == "OSPF":
+            return self._verify_ospf(intent)
+        return VerificationResult(
+            success=False,
+            error_message=f"Unsupported feature: {feature}",
+        )
+
+    # ------------------------------------------------------------------
+    # 内部辅助：状态获取
+    # ------------------------------------------------------------------
+    def _get_vlan_state(self, intent: dict[str, Any]) -> CurrentState:
+        """获取 VLAN 当前状态。"""
+        vlan_id = intent.get("vlan_id", 0)
+        output = self._query(f"display vlan {vlan_id}")
+
+        if not output or "Error" in output:
+            return CurrentState(feature="VLAN", exists=False, data={})
+
+        # 解析 name 和 description（兼容 mock 与真实设备输出）
+        name: str | None = None
+        name_match = re.search(r"(?:VLAN\s+)?Name\s*:\s*(\S+)", output, re.IGNORECASE)
+        if name_match:
+            name = name_match.group(1)
+        if not name:
+            name_match = re.search(r"^\s*name\s+(\S+)", output, re.MULTILINE)
+            if name_match:
+                name = name_match.group(1)
+
+        desc: str | None = None
+        desc_match = re.search(r"Description\s*:\s*(.+)", output, re.IGNORECASE)
+        if desc_match:
+            desc = desc_match.group(1).strip()
+
+        # 检测是否关联 Vlanif 三层接口
+        has_vlanif = False
+        vlanif_output = self._query(
+            f"display current-configuration interface Vlanif{vlan_id}"
+        )
+        if (
+            vlanif_output
+            and "Error" not in vlanif_output
+            and f"interface Vlanif{vlan_id}" in vlanif_output
+        ):
+            has_vlanif = True
+
+        return CurrentState(
+            feature="VLAN",
+            exists=True,
+            data={
+                "vlan_id": vlan_id,
+                "name": name,
+                "description": desc,
+                "has_vlanif": has_vlanif,
+            },
+        )
+
+    def _get_interface_state(self, intent: dict[str, Any]) -> CurrentState:
+        """获取接口当前状态。"""
+        ifname = intent.get("interface_name", "")
+        output = self._query(f"display current-configuration interface {ifname}")
+
+        if not output or "Error" in output:
+            return CurrentState(feature="INTERFACE", exists=False, data={})
+
+        config = self._parse_interface_config(output, ifname)
+        return CurrentState(
+            feature="INTERFACE",
+            exists=True,
+            data=config.to_dict(),
+        )
+
+    def _get_ospf_state(self, intent: dict[str, Any]) -> CurrentState:
+        """获取 OSPF 进程当前状态。"""
+        process_id = intent.get("process_id", 1)
+        config_output = self._query("display current-configuration configuration ospf")
+
+        parser = HuaweiOspfParser()
+        state = parser.parse_running_config(config_output or "", process_id)
+
+        return CurrentState(
+            feature="OSPF",
+            exists=state.running,
+            data=state.to_dict(),
+        )
+
+    # ------------------------------------------------------------------
+    # 内部辅助：验证
+    # ------------------------------------------------------------------
+    def _verify_vlan(self, intent: dict[str, Any]) -> VerificationResult:
+        """验证 VLAN 配置。"""
+        vlan_id = intent.get("vlan_id", 0)
+        operation = intent.get("operation", "create")
+
+        display_output = self._query(f"display vlan {vlan_id}")
+        vlan_exists = (
+            bool(display_output)
+            and "Error" not in display_output
+            and str(vlan_id) in display_output
+        )
+
+        if operation == "delete":
+            if not vlan_exists:
+                return VerificationResult(
+                    success=True,
+                    details={"status": "deleted", "vlan_id": vlan_id},
+                )
+            return VerificationResult(
+                success=False,
+                error_message=f"VLAN {vlan_id} still exists after deletion",
+                details={"status": "exists", "vlan_id": vlan_id},
+            )
+
+        if not vlan_exists:
+            return VerificationResult(
+                success=False,
+                error_message=f"VLAN {vlan_id} does not exist",
+                details={"status": "not_found", "vlan_id": vlan_id},
+            )
+
+        # 尝试 | section 获取详细配置，失败时回退到 display this
+        config_raw = self._query(
+            f"display current-configuration | section vlan {vlan_id}"
+        )
+        if not config_raw or "Error" in config_raw:
+            self._send("system-view")
+            self._send(f"vlan {vlan_id}")
+            config_raw = self._send("display this")
+            self._send("quit")
+            self._send("return")
+
+        # 从配置段中解析特定 VLAN 的 name 和 description
+        actual_name = ""
+        actual_desc = ""
+        vlan_section = re.search(
+            rf"vlan\s+{vlan_id}\b(.*?)(?=\n\s*vlan\s+\d|\n#|\ninterface\s|\nreturn|\Z)",
+            config_raw,
+            re.DOTALL,
+        )
+        section_text = vlan_section.group(1) if vlan_section else config_raw
+
+        name_match = re.search(r"^\s*name\s+(\S+)", section_text, re.MULTILINE)
+        if name_match:
+            actual_name = name_match.group(1)
+        desc_match = re.search(r"^\s*description\s+(.+)", section_text, re.MULTILINE)
+        if desc_match:
+            actual_desc = desc_match.group(1).strip()
+
+        success = True
+        expected_name = intent.get("name")
+        expected_desc = intent.get("description")
+        if expected_name and expected_name != actual_name:
+            success = False
+        if expected_desc and expected_desc != actual_desc:
+            success = False
+
+        return VerificationResult(
+            success=success,
+            details={
+                "vlan_id": vlan_id,
+                "actual_name": actual_name,
+                "actual_description": actual_desc,
+                "config_raw": config_raw,
+            },
+        )
+
+    def _verify_interface(self, intent: dict[str, Any]) -> VerificationResult:
+        """验证接口配置。"""
+        ifname = intent.get("interface_name", "")
+        output = self._query(f"display current-configuration interface {ifname}")
+
+        if not output or "Error" in output:
+            return VerificationResult(
+                success=False,
+                error_message=f"Interface {ifname} not found",
+            )
+
+        config = self._parse_interface_config(output, ifname)
+
+        success = True
+        if intent.get("description") is not None and intent["description"] != config.get("description"):
+            success = False
+        if intent.get("admin_up") is not None and intent["admin_up"] != config.get("admin_up"):
+            success = False
+        if intent.get("link_type") and intent["link_type"] != config.get("link_type"):
+            success = False
+        if intent.get("access_vlan") is not None and intent["access_vlan"] != config.get("access_vlan"):
+            success = False
+
+        return VerificationResult(
+            success=success,
+            details={"interface_name": ifname, "config": config.to_dict()},
+        )
+
+    def _verify_ospf(self, intent: dict[str, Any]) -> VerificationResult:
+        """验证 OSPF 配置。"""
+        process_id = intent.get("process_id", 1)
+        operation = intent.get("operation", "ensure_present")
+
+        parser = HuaweiOspfParser()
+
+        brief_output = self._query(f"display ospf brief process {process_id}")
+        running, _ = parser.parse_brief(brief_output, process_id)
+
+        if operation == "ensure_absent":
+            if not running:
+                return VerificationResult(
+                    success=True,
+                    details={"status": "deleted", "process_id": process_id},
+                )
+            return VerificationResult(
+                success=False,
+                error_message=f"OSPF process {process_id} still running",
+                details={"status": "running", "process_id": process_id},
+            )
+
+        if not running:
+            return VerificationResult(
+                success=False,
+                error_message=f"OSPF process {process_id} not running",
+                details={"process_running": False},
+            )
+
+        # 验证接口
+        iface_output = self._query(f"display ospf interface process {process_id}")
+        iface_states = parser.parse_interface_display(iface_output)
+        iface_names = {
+            i.get("interface_name", "").lower() for i in iface_states
+        }
+
+        interfaces_valid = True
+        intent_ifaces = intent.get("interfaces") or []
+        for iface_intent in intent_ifaces:
+            name = iface_intent.get("interface_name", "")
+            if name.lower() not in iface_names:
+                interfaces_valid = False
+                break
+
+        # 验证邻居
+        neighbors_full: bool | None = None
+        neighbors_expected: bool | None = None
+        expected_neighbors = intent.get("expected_neighbors")
+        if expected_neighbors:
+            peer_output = self._query(f"display ospf peer process {process_id}")
+            peers = parser.parse_peer(peer_output)
+            full_peers = {p["neighbor_id"] for p in peers if p["is_full"]}
+            expected_set = set(expected_neighbors)
+            neighbors_full = expected_set.issubset(full_peers)
+            neighbors_expected = neighbors_full
+
+        success = running and interfaces_valid
+        if expected_neighbors:
+            success = success and bool(neighbors_expected)
+
+        return VerificationResult(
+            success=success,
+            details={
+                "process_running": running,
+                "interfaces_valid": interfaces_valid,
+                "neighbors_full": neighbors_full,
+                "neighbors_expected": neighbors_expected,
+            },
+        )
 
     # ------------------------------------------------------------------
     # 内部辅助：连接与命令执行

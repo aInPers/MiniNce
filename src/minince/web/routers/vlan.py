@@ -11,7 +11,7 @@ from minince.infrastructure.repositories.device_repository import DeviceReposito
 from minince.infrastructure.security.encryption import EncryptionManager
 from minince.shared.exceptions import ValidationError
 
-router = APIRouter(tags=["ospf"])
+router = APIRouter(tags=["vlan"])
 
 
 def _create_driver(db: Session, device_id: int) -> Any:
@@ -32,35 +32,21 @@ def _create_driver(db: Session, device_id: int) -> Any:
     )
 
 
-@router.post("/api/v1/devices/{device_id}/ospf/preview")
-async def api_ospf_preview(
+@router.post("/api/v1/devices/{device_id}/vlan/preview")
+async def api_vlan_preview(
     device_id: int,
     intent: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """预览 OSPF 配置命令（不执行）。"""
+    """预览 VLAN 配置命令（不执行）。"""
     driver = _create_driver(db, device_id)
 
     intent_data = dict(intent)
-    intent_data.setdefault("feature", "OSPF")
+    intent_data.setdefault("feature", "VLAN")
 
     try:
         current_state = driver.get_current_state(intent_data)
         plan = driver.build_plan(intent_data, current_state)
-
-        # 脱敏：如果 intent 中携带了明文 auth_secret，需要从返回的 commands 中移除
-        secrets: list[str] = []
-        for iface in intent_data.get("interfaces") or []:
-            s = iface.get("auth_secret")
-            if s:
-                secrets.append(s)
-        if secrets:
-            redacted = list(plan.commands)
-            for i, cmd in enumerate(redacted):
-                for s in secrets:
-                    if s and s in cmd:
-                        redacted[i] = cmd.replace(s, "********")
-            plan.commands = redacted
 
         return {
             "device_id": device_id,
@@ -78,17 +64,17 @@ async def api_ospf_preview(
         driver.disconnect()
 
 
-@router.post("/api/v1/devices/{device_id}/ospf/deploy")
-async def api_ospf_deploy(
+@router.post("/api/v1/devices/{device_id}/vlan/deploy")
+async def api_vlan_deploy(
     device_id: int,
     intent: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """下发 OSPF 配置并验证。"""
+    """下发 VLAN 配置并验证。"""
     driver = _create_driver(db, device_id)
 
     intent_data = dict(intent)
-    intent_data.setdefault("feature", "OSPF")
+    intent_data.setdefault("feature", "VLAN")
 
     try:
         current_state = driver.get_current_state(intent_data)
@@ -99,42 +85,20 @@ async def api_ospf_deploy(
                 "device_id": device_id,
                 "success": True,
                 "changed": False,
-                "message": "OSPF 配置已与期望一致，无需变更",
+                "message": "VLAN 配置已与期望一致，无需变更",
                 "commands": [],
                 "verification": {"success": True, "details": {}},
             }
 
-        # 脱敏：执行前从 intent 中提取明文密码用于实际下发，但返回结果中脱敏
-        secrets: list[str] = []
-        for iface in intent_data.get("interfaces") or []:
-            s = iface.get("auth_secret")
-            if s:
-                secrets.append(s)
-
         result = driver.apply_plan(plan)
-
-        # 对返回的命令输出脱敏
-        if secrets and result.command_outputs:
-            for entry in result.command_outputs:
-                out = entry.get("output", "")
-                for s in secrets:
-                    if s and s in out:
-                        entry["output"] = out.replace(s, "********")
-
-        redacted_commands = list(plan.commands)
-        if secrets:
-            for i, cmd in enumerate(redacted_commands):
-                for s in secrets:
-                    if s and s in cmd:
-                        redacted_commands[i] = cmd.replace(s, "********")
 
         if not result.success:
             return {
                 "device_id": device_id,
                 "success": False,
                 "changed": True,
-                "message": result.error_message or "OSPF 配置下发失败",
-                "commands": redacted_commands,
+                "message": result.error_message or "VLAN 配置下发失败",
+                "commands": plan.commands,
                 "command_outputs": result.command_outputs,
             }
 
@@ -143,8 +107,8 @@ async def api_ospf_deploy(
             "device_id": device_id,
             "success": True,
             "changed": True,
-            "message": "OSPF 配置下发成功",
-            "commands": redacted_commands,
+            "message": "VLAN 配置下发成功",
+            "commands": plan.commands,
             "command_outputs": result.command_outputs,
             "verification": {
                 "success": verify.success,
@@ -159,23 +123,23 @@ async def api_ospf_deploy(
         driver.disconnect()
 
 
-@router.get("/api/v1/devices/{device_id}/ospf/state")
-async def api_ospf_get_state(
+@router.get("/api/v1/devices/{device_id}/vlan/state/{vlan_id}")
+async def api_vlan_get_state(
     device_id: int,
-    process_id: int = 1,
+    vlan_id: int,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """获取设备当前 OSPF 状态。"""
+    """获取设备上指定 VLAN 的当前状态。"""
     driver = _create_driver(db, device_id)
 
-    intent_data = {"feature": "OSPF", "process_id": process_id}
+    intent_data = {"feature": "VLAN", "vlan_id": vlan_id}
     try:
         state = driver.get_current_state(intent_data)
         return {
             "device_id": device_id,
-            "process_id": process_id,
+            "vlan_id": vlan_id,
             "exists": state.exists,
-            "state": state.data,
+            "data": state.data,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
