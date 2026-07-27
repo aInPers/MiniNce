@@ -426,6 +426,20 @@
         return node;
     }
 
+    function bindPaletteItemEvents(item) {
+        const deviceId = parseInt(item.dataset.id, 10);
+        item.addEventListener('dragstart', (e) => {
+            dragState = { id: deviceId, mode: 'palette', offsetX: 28, offsetY: 28 };
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('text/plain', String(deviceId));
+            item.classList.add('dragging');
+        });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            dragState = null;
+        });
+    }
+
     function createPaletteItem(device) {
         const item = document.createElement('div');
         item.className = 'palette-item';
@@ -442,16 +456,7 @@
             '<div class="pi-info"><div class="pi-name"></div><div class="pi-meta"></div></div>';
         item.querySelector('.pi-name').textContent = device.name;
         item.querySelector('.pi-meta').textContent = device.management_ip;
-        item.addEventListener('dragstart', (e) => {
-            dragState = { id: device.id, mode: 'palette', offsetX: 28, offsetY: 28 };
-            e.dataTransfer.effectAllowed = 'copy';
-            e.dataTransfer.setData('text/plain', String(device.id));
-            item.classList.add('dragging');
-        });
-        item.addEventListener('dragend', () => {
-            item.classList.remove('dragging');
-            dragState = null;
-        });
+        bindPaletteItemEvents(item);
         return item;
     }
 
@@ -609,6 +614,8 @@
 
     // 初始化已有节点事件
     canvas.querySelectorAll('.node').forEach(bindNodeEvents);
+    // 初始化已有设备列表项事件(服务端渲染的 palette 项)
+    paletteList.querySelectorAll('.palette-item').forEach(bindPaletteItemEvents);
     updateEmptyState();
 })();
 </script>
