@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from minince.config import settings
 from minince.infrastructure.database.connection import get_db
 from minince.infrastructure.repositories.device_repository import DeviceRepository
-from minince.infrastructure.repositories.task_repository import TaskRepository
 
 router = APIRouter()
 
@@ -33,13 +32,8 @@ def get_jinja_env() -> Environment:
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     device_repo = DeviceRepository(db)
-    task_repo = TaskRepository(db)
 
     device_count = device_repo.count_all()
-    task_count = task_repo.count_all()
-    active_task_count = task_repo.count_all(status="RUNNING")
-
-    recent_tasks = task_repo.get_all(limit=5)
 
     env = get_jinja_env()
     template = env.get_template("index.html")
@@ -48,9 +42,6 @@ async def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse
         app_name=settings.app_name,
         app_version=settings.app_version,
         device_count=device_count,
-        task_count=task_count,
-        active_task_count=active_task_count,
-        recent_tasks=recent_tasks,
         active_page="home",
     )
     return HTMLResponse(content=html)

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}手动配置 - MiniNCE{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>手动配置</h1>
+    <div class="subtitle">通过 SSH 直接向设备下发命令</div>
+</div>
+
+{% if error %}
+<div class="error-message">{{ error }}</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">
+        <h2>命令执行</h2>
+    </div>
+    <form method="post" action="/manual-config">
+        <div class="form-group">
+            <label for="device_id">选择设备</label>
+            <select name="device_id" id="device_id" required>
+                <option value="">-- 请选择设备 --</option>
+                {% for device in devices %}
+                <option value="{{ device.id }}" {% if selected_device_id == device.id %}selected{% endif %}>
+                    {{ device.name }} ({{ device.management_ip }}:{{ device.port }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="commands">配置命令</label>
+            <textarea name="commands" id="commands" rows="12" placeholder="每行一条命令，以 # 开头的行会被忽略&#10;示例：&#10;system-view&#10;interface Vlanif 100&#10;ip address 192.168.100.1 24&#10;quit&#10;return">{{ commands_text or '' }}</textarea>
+            <div class="form-hint">命令将原样发送到设备，用户需自行控制视图切换（system-view / quit / return 等）</div>
+        </div>
+
+        <div class="form-group">
+            <label for="created_by">操作人</label>
+            <input type="text" name="created_by" id="created_by" value="web" placeholder="操作人标识">
+        </div>
+
+        <div class="form-group">
+            <div class="checkbox-group">
+                <input type="checkbox" name="save_config" id="save_config" {% if save_config %}checked{% endif %}>
+                <label for="save_config">执行后保存配置到设备 (save force)</label>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                执行命令
+            </button>
+            <a href="/manual-config" class="btn btn-secondary">清空</a>
+        </div>
+    </form>
+</div>
+
+{% if results is defined and results %}
+<div class="card">
+    <div class="card-header">
+        <h2>执行结果</h2>
+        <span class="count">{{ results | length }} 条命令</span>
+    </div>
+
+    {% for result in results %}
+    <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+            <span class="mono" style="font-weight: 600; color: var(--text-primary);">{{ result.command }}</span>
+            {% if result.status == "ok" %}
+            <span class="status-badge status-SUCCEEDED">成功</span>
+            {% else %}
+            <span class="status-badge status-FAILED">失败</span>
+            {% endif %}
+        </div>
+        {% if result.output %}
+        <pre class="command-output">{{ result.output }}</pre>
+        {% else %}
+        <div class="info-box no-border" style="color: var(--text-muted); font-size: 13px;">（无输出）</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if devices is defined and devices|length == 0 %}
+<div class="empty-state">
+    <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    </div>
+    <p>暂无设备</p>
+    <p class="hint">请先<a href="/devices/new" style="color: var(--color-primary);">添加设备</a>再进行手动配置</p>
+</div>
+{% endif %}
+{% endblock %}

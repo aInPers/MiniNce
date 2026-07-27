@@ -1,67 +1,44 @@
 {% extends "base.html" %}
 {% block title %}首页 - MiniNCE{% endblock %}
 {% block content %}
-<div class="card">
-    <div class="card-header">
-        <h2>MiniNCE 网络自动化配置平台</h2>
-    </div>
-    <div class="grid-3">
-        <div class="card" style="text-align:center;margin-bottom:0">
-            <div style="font-size:42px;font-weight:700;color:#667eea">{{ device_count }}</div>
-            <div style="color:#718096;font-size:14px">设备总数</div>
+<div class="page-header">
+    <h1>控制台</h1>
+    <div class="subtitle">网络自动化配置平台总览</div>
+</div>
+
+<div class="card" style="margin-bottom:18px">
+    <div class="stat-card" style="margin-bottom:0">
+        <div class="stat-icon" style="background:var(--color-primary-bg);color:var(--color-primary)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         </div>
-        <div class="card" style="text-align:center;margin-bottom:0">
-            <div style="font-size:42px;font-weight:700;color:#667eea">{{ task_count }}</div>
-            <div style="color:#718096;font-size:14px">任务总数</div>
-        </div>
-        <div class="card" style="text-align:center;margin-bottom:0">
-            <div style="font-size:42px;font-weight:700;color:#48bb78">{{ active_task_count }}</div>
-            <div style="color:#718096;font-size:14px">执行中任务</div>
-        </div>
+        <div class="stat-value">{{ device_count }}</div>
+        <div class="stat-label">设备总数</div>
     </div>
 </div>
-<div class="card">
-    <div class="card-header">
-        <h2>最近任务</h2>
-    </div>
-    {% if recent_tasks %}
-    <table>
-        <thead>
-            <tr>
-                <th>任务编号</th>
-                <th>类型</th>
-                <th>设备ID</th>
-                <th>状态</th>
-                <th>创建时间</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for task in recent_tasks %}
-            <tr>
-                <td><a href="/tasks/{{ task.id }}">{{ task.task_number }}</a></td>
-                <td>{{ task.task_type }}</td>
-                <td>{{ task.device_id }}</td>
-                <td><span class="status-badge status-{{ task.status }}">{{ task.status }}</span></td>
-                <td>{{ task.created_at }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">
-        <div class="icon">📋</div>
-        <p>暂无任务记录</p>
-    </div>
-    {% endif %}
-</div>
+
 <div class="card">
     <div class="card-header">
         <h2>快捷操作</h2>
     </div>
-    <div class="grid-3">
-        <a href="/devices/new" class="btn btn-primary" style="text-align:center;padding:20px">+ 添加设备</a>
-        <a href="/tasks/new/vlan" class="btn btn-primary" style="text-align:center;padding:20px">+ 创建VLAN任务</a>
-        <a href="/tasks/new/interface" class="btn btn-primary" style="text-align:center;padding:20px">+ 创建接口任务</a>
+    <div class="grid-2">
+        <a href="/devices/new" class="action-card">
+            <span class="ac-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </span>
+            添加设备
+            <span class="ac-arrow">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </span>
+        </a>
+        <a href="/manual-config" class="action-card">
+            <span class="ac-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            </span>
+            手动配置设备
+            <span class="ac-arrow">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </span>
+        </a>
     </div>
 </div>
 {% endblock %}

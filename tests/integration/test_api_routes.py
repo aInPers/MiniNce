@@ -64,13 +64,12 @@ class TestIndexPage:
         response = client.get("/")
         assert response.status_code == 200
         assert "设备总数" in response.text
-        assert "任务总数" in response.text
 
     def test_index_page_contains_quick_actions(self, client: TestClient) -> None:
         response = client.get("/")
         assert response.status_code == 200
         assert "添加设备" in response.text
-        assert "创建VLAN任务" in response.text
+        assert "手动配置" in response.text
 
 
 class TestStatsAPI:
@@ -79,16 +78,7 @@ class TestStatsAPI:
         assert response.status_code == 200
         data = response.json()
         assert "devices" in data
-        assert "tasks" in data
         assert data["devices"]["total"] == 0
-
-    def test_stats_api_task_counts(self, client: TestClient) -> None:
-        response = client.get("/api/v1/stats")
-        data = response.json()
-        assert "total" in data["tasks"]
-        assert "running" in data["tasks"]
-        assert "succeeded" in data["tasks"]
-        assert "failed" in data["tasks"]
 
 
 class TestErrorHandlers:

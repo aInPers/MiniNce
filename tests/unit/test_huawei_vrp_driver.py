@@ -2,28 +2,30 @@ from __future__ import annotations
 
 import pytest
 
-from minince.infrastructure.drivers.huawei_vrp.driver import HuaweiVRPDriver
-from minince.shared.enums import RiskLevel
+from minince.infrastructure.drivers.huawei_vrp.huawei_device import HuaweiDevice
+from minince.infrastructure.ssh.base import SSHConfig
+from minince.infrastructure.ssh.mock_connection import MockSSHConnection
+from minince.shared.enums import ConnectionType, RiskLevel
 
 
-class TestHuaweiVRPDriverConnection:
+class TestHuaweiDeviceConnection:
     def test_connection_success(self) -> None:
-        driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
-        result = driver.test_connection()
+        driver = HuaweiDevice(host="mock:192.168.1.1", port=22, username="admin", password="test")
+        result = driver.connect(ConnectionType.SSH)
 
         assert result.success is True
         assert "mock:192.168.1.1" in result.message
 
     def test_connection_no_host(self) -> None:
-        driver = HuaweiVRPDriver()
-        result = driver.test_connection()
+        driver = HuaweiDevice()
+        result = driver.connect(ConnectionType.SSH)
 
         assert result.success is False
         assert result.error_type == "NO_HOST"
 
     def test_get_facts_when_connected(self) -> None:
-        driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
-        driver.test_connection()
+        driver = HuaweiDevice(host="mock:192.168.1.1", port=22, username="admin", password="test")
+        driver.connect(ConnectionType.SSH)
         facts = driver.get_facts()
 
         assert facts.vendor == "HUAWEI"
@@ -31,7 +33,7 @@ class TestHuaweiVRPDriverConnection:
         assert facts.model
 
     def test_get_facts_default(self) -> None:
-        driver = HuaweiVRPDriver()
+        driver = HuaweiDevice()
         facts = driver.get_facts()
 
         # 默认使用 MockSSHConnection，_ensure_connected 会自动连接
@@ -39,10 +41,10 @@ class TestHuaweiVRPDriverConnection:
         assert facts.hostname
 
 
-class TestHuaweiVRPDriverVLAN:
+class TestHuaweiDeviceVLAN:
     def setup_method(self) -> None:
-        self.driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
-        self.driver.test_connection()
+        self.driver = HuaweiDevice(host="mock:192.168.1.1", port=22, username="admin", password="test")
+        self.driver.connect(ConnectionType.SSH)
 
     def test_get_current_state_vlan_not_exists(self) -> None:
         intent = {"feature": "VLAN", "vlan_id": 100}
@@ -230,10 +232,10 @@ class TestHuaweiVRPDriverVLAN:
         assert result.success is True
 
 
-class TestHuaweiVRPDriverInterface:
+class TestHuaweiDeviceInterface:
     def setup_method(self) -> None:
-        self.driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
-        self.driver.test_connection()
+        self.driver = HuaweiDevice(host="mock:192.168.1.1", port=22, username="admin", password="test")
+        self.driver.connect(ConnectionType.SSH)
 
     def test_get_current_state_interface(self) -> None:
         intent = {"feature": "INTERFACE", "interface_name": "GigabitEthernet0/0/1"}
@@ -323,16 +325,118 @@ class TestHuaweiVRPDriverInterface:
         assert plan2.changed is False
 
 
-class TestHuaweiVRPDriverUnsupported:
+class TestHuaweiDeviceUnsupported:
     def setup_method(self) -> None:
-        self.driver = HuaweiVRPDriver(host="mock:192.168.1.1", port=22, username="admin", password="test")
-        self.driver.test_connection()
+        self.driver = HuaweiDevice(host="mock:192.168.1.1", port=22, username="admin", password="test")
+        self.driver.connect(ConnectionType.SSH)
 
     def test_unsupported_feature(self) -> None:
-        intent = {"feature": "OSPF", "process_id": 1}
+        intent = {"feature": "BGP", "process_id": 1}
         state = self.driver.get_current_state(intent)
         plan = self.driver.build_plan(intent, state)
 
         assert plan.changed is False
         assert len(plan.warnings) > 0
         assert "Unsupported feature" in plan.warnings[0]
+
+
+class SectionUnsupportedSSHConnection:
+    """模拟不支持 | section 过滤器的设备 SSH 连接。
+
+    display current-configuration | section 返回 Error，
+    其他命令委托给 MockSSHConnection（含 display this 回退路径）。
+    """
+
+    def __init__(self, config: SSHConfig) -> None:
+        self._inner = MockSSHConnection(config)
+
+    @property
+    def is_connected(self) -> bool:
+        return self._inner.is_connected
+
+    def connect(self) -> None:
+        self._inner.connect()
+
+    def disconnect(self) -> None:
+        self._inner.disconnect()
+
+    def send_command(self, command: str, read_timeout: int | None = None) -> str:
+        cmd = command.strip()
+        if cmd.startswith("display current-configuration") and "| section" in cmd:
+            return "Error: Unrecognized command found at '^' position."
+        return self._inner.send_command(command, read_timeout)
+
+    def send_config_set(self, config_commands: list[str]) -> str:
+        return self._inner.send_config_set(config_commands)
+
+    def send_command_timing(self, command: str) -> str:
+        return self._inner.send_command_timing(command)
+
+    def save_config(self) -> str:
+        return self._inner.save_config()
+
+    def __enter__(self) -> SectionUnsupportedSSHConnection:
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.disconnect()
+
+
+class TestVlanConfigReadbackFallback:
+    """VLAN 配置回读回退测试：| section 不支持时回退到 display this。"""
+
+    def setup_method(self) -> None:
+        config = SSHConfig(host="mock:192.168.1.1", port=22, username="admin", password="test")
+        ssh_conn = SectionUnsupportedSSHConnection(config)
+        self.driver = HuaweiDevice(
+            host="mock:192.168.1.1", port=22, username="admin", password="test",
+            ssh_connection=ssh_conn,
+        )
+        self.driver.connect(ConnectionType.SSH)
+
+    def test_verify_vlan_falls_back_to_display_this(self) -> None:
+        """| section 返回 Error 时，通过 display this 成功读取 name/description。"""
+        intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 202,
+            "name": "aaa",
+            "description": "aaaaa",
+            "device_id": 1,
+        }
+        state = self.driver.get_current_state(intent)
+        plan = self.driver.build_plan(intent, state)
+        self.driver.apply_plan(plan)
+
+        result = self.driver.verify(intent)
+        assert result.success is True
+        assert result.details.get("actual_name") == "aaa"
+
+    def test_verification_failure_includes_config_raw(self) -> None:
+        """验证失败时 details 中包含 config_raw 原始输出，便于诊断。"""
+        intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 203,
+            "name": "expected_name",
+            "description": "expected_desc",
+            "device_id": 1,
+        }
+        state = self.driver.get_current_state(intent)
+        plan = self.driver.build_plan(intent, state)
+        self.driver.apply_plan(plan)
+
+        # 用不匹配的期望值触发验证失败
+        verify_intent = {
+            "feature": "VLAN",
+            "operation": "create",
+            "vlan_id": 203,
+            "name": "wrong_name",
+            "description": "wrong_desc",
+            "device_id": 1,
+        }
+        result = self.driver.verify(verify_intent)
+        assert result.success is False
+        assert "config_raw" in result.details
+        assert "vlan 203" in result.details["config_raw"]

@@ -23,6 +23,14 @@ class HuaweiOspfParser:
         if not output:
             return False, None
 
+        # 明确的错误/未找到/未使能标志优先
+        if re.search(
+            r"not found|is disabled|not enabled|not active|Error:",
+            output,
+            re.IGNORECASE,
+        ):
+            return False, None
+
         running = False
         # "OSPF Process 1 with Router ID 10.255.0.1"
         header = re.search(
@@ -33,14 +41,9 @@ class HuaweiOspfParser:
         if header:
             router_id = header.group(1)
             running = True
-        else:
-            # 仍可能匹配到进程头但进程 id 不同
-            if re.search(rf"OSPF Process\s+{process_id}\b", output):
-                running = True
+        elif re.search(rf"OSPF Process\s+{process_id}\b", output):
+            running = True
 
-        # 明确的关闭/未使能标志
-        if re.search(r"is disabled|not enabled|not active", output, re.IGNORECASE):
-            running = False
         return running, router_id
 
     def parse_running_config(self, output: str, process_id: int) -> OspfProcessState:

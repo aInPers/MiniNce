@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from minince.shared.exceptions import (
     ConfigurationError,
     DeviceAuthenticationError,
@@ -10,12 +8,6 @@ from minince.shared.exceptions import (
     EncryptionError,
     MiniNCEError,
     RepositoryError,
-    RiskBlockedError,
-    TaskExecutionError,
-    TaskNotFoundError,
-    TaskStateError,
-    TemplateNotFoundError,
-    TemplateRenderError,
     ValidationError,
 )
 
@@ -64,43 +56,10 @@ class TestDeviceErrors:
         assert error.details["device_id"] == 1
 
 
-class TestTaskErrors:
-    def test_task_not_found_error(self) -> None:
-        error = TaskNotFoundError("TASK-001")
-        assert error.code == "TASK_NOT_FOUND"
-        assert error.details["task_id"] == "TASK-001"
-
-    def test_task_state_error(self) -> None:
-        error = TaskStateError("Invalid state", current_state="DRAFT", expected_state="READY")
-        assert error.code == "TASK_STATE_ERROR"
-        assert error.details["current_state"] == "DRAFT"
-        assert error.details["expected_state"] == "READY"
-
-    def test_task_execution_error(self) -> None:
-        error = TaskExecutionError("Execution failed")
-        assert error.code == "TASK_EXECUTION_ERROR"
-
-
-class TestTemplateErrors:
-    def test_template_not_found_error(self) -> None:
-        error = TemplateNotFoundError(5)
-        assert error.code == "TEMPLATE_NOT_FOUND"
-
-    def test_template_render_error(self) -> None:
-        error = TemplateRenderError("Render failed", "test_template")
-        assert error.code == "TEMPLATE_RENDER_ERROR"
-        assert error.details["template_name"] == "test_template"
-
-
 class TestOtherErrors:
     def test_encryption_error(self) -> None:
         error = EncryptionError("Encrypt failed")
         assert error.code == "ENCRYPTION_ERROR"
-
-    def test_risk_blocked_error(self) -> None:
-        error = RiskBlockedError("High risk operation", "HIGH")
-        assert error.code == "RISK_BLOCKED"
-        assert error.details["risk_level"] == "HIGH"
 
     def test_configuration_error(self) -> None:
         error = ConfigurationError("Config error")

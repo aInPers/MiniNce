@@ -71,7 +71,7 @@ class HuaweiOspfRenderer:
         return ConfigPlan(
             device_id=int(intent_dict.get("device_id", 0)),
             feature="OSPF",
-            intent=intent.to_structured_intent(auth_secret_encrypted=None),
+            intent=intent.to_structured_intent(),
             current_state=current.to_dict(),
             commands=commands,
             verify_commands=verify_commands,

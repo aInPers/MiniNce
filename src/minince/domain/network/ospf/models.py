@@ -150,12 +150,18 @@ class OspfProcessIntent(BaseModel):
             raise ValueError("OSPF interface names must be unique")
         return interfaces
 
-    def to_structured_intent(self, *, auth_secret_encrypted: str | None = None) -> dict[str, Any]:
+    def to_structured_intent(
+        self,
+        *,
+        auth_secrets_encrypted: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """转换为可落库的 structured_intent。
 
         - 不包含明文密码；认证密码以加密密文形式附带（由调用方加密）。
         - 每个接口仅保留认证摘要，避免明文密码进入任务记录。
+        - auth_secrets_encrypted: interface_name -> 加密密文 的映射；未提供则为 None。
         """
+        secrets_map = auth_secrets_encrypted or {}
         return {
             "feature": "OSPF",
             "operation": self.operation.value,
@@ -178,7 +184,7 @@ class OspfProcessIntent(BaseModel):
                     **i.auth_summary(),
                     # 加密密文随结构化意图落库，执行时解密；无密码则为 None
                     "auth_secret_encrypted": (
-                        auth_secret_encrypted if i.auth_secret else None
+                        secrets_map.get(i.interface_name) if i.auth_secret else None
                     ),
                 }
                 for i in self.interfaces

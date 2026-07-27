@@ -1,3 +1,3 @@
-from minince.infrastructure.drivers.huawei_vrp.driver import HuaweiVRPDriver
+from minince.infrastructure.drivers.huawei_vrp.huawei_device import HuaweiDevice
 
-__all__ = ["HuaweiVRPDriver"]
+__all__ = ["HuaweiDevice"]

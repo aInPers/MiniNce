@@ -48,61 +48,6 @@ class Device(Base, TimestampMixin):
     canvas_y: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class ConfigTask(Base, TimestampMixin):
-    __tablename__ = "config_tasks"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    task_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    task_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    device_id: Mapped[int] = mapped_column(nullable=False)
-    status: Mapped[str] = mapped_column(String(50), default="DRAFT", nullable=False)
-    risk_level: Mapped[str] = mapped_column(String(20), default="LOW", nullable=False)
-    original_request: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=True)
-    structured_intent: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=True)
-    generated_commands: Mapped[list[str]] = mapped_column(JSON, nullable=True)
-    execution_output: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=True)
-    verification_output: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=True)
-    error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    created_by: Mapped[str] = mapped_column(String(100), default="system", nullable=False)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-    # 乐观锁版本号：用于原子抢占，防止并发执行同一任务
-    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    # 执行令牌：抢占成功后生成唯一令牌，后续操作需验证令牌归属
-    execution_token: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # 设备级互斥锁
-    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    locked_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
-
-class TaskStep(Base, TimestampMixin):
-    __tablename__ = "task_steps"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    task_id: Mapped[int] = mapped_column(nullable=False, index=True)
-    step_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    status: Mapped[str] = mapped_column(String(50), default="PENDING", nullable=False)
-    input_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=True)
-    output_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=True)
-    error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-
-class ConfigTemplate(Base, TimestampMixin):
-    __tablename__ = "config_templates"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    vendor: Mapped[str] = mapped_column(String(50), nullable=False)
-    feature: Mapped[str] = mapped_column(String(100), nullable=False)
-    version: Mapped[str] = mapped_column(String(50), default="1.0", nullable=False)
-    template_content: Mapped[str] = mapped_column(String, nullable=False)
-    variable_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=True)
-    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
-
-
 class ConfigBackup(Base, TimestampMixin):
     __tablename__ = "config_backups"
 

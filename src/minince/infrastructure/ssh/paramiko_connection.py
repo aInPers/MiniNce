@@ -46,6 +46,11 @@ class ParamikoSSHConnection:
 
         self._client = paramiko.SSHClient()
 
+        # 加载系统已知主机密钥（~/.ssh/known_hosts），使 RejectPolicy 能基于
+        # 已登记指纹校验设备。文件不存在时静默跳过，不影响后续策略。
+        # 连接真实设备前需先用 ssh-keyscan 将设备指纹登记到 known_hosts。
+        self._client.load_system_host_keys()
+
         # 根据配置选择主机密钥策略
         if self.config.auto_add_host_key:
             # 仅在显式开启首次发现模式时自动接受主机密钥

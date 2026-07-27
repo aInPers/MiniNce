@@ -1,591 +1,369 @@
-## 代码审查结论
+<br />
 
-我审查了当前 `master` 分支中的任务执行器、SSH 实现、配置管理、依赖注入和项目说明。由于当前运行环境无法直接克隆 GitHub 仓库，本次属于**静态审查**，未实际运行测试。
+建议下一阶段先实现 **OSPFv2 基础闭环**：
 
-整体架构方向是正确的：已经按照领域层、应用层、基础设施层和 Web 层拆分，并具备驱动抽象、仓储、任务状态和审计记录等基础结构。([GitHub](https://github.com/aInPers/MiniNce "GitHub - aInPers/MiniNce · GitHub"))
+### 第一版实现范围
 
-但目前存在几项会直接影响安全性和任务可靠性的严重问题。
+支持以下能力：
 
-***
+- 创建、修改、删除 OSPF 进程
+- 配置 Router ID
+- 创建 Area
+- 发布 IPv4 网段
+- 接口方式启用 OSPF
+- 配置接口 Cost
+- 配置接口 Network Type
+- 配置静默接口
+- OSPF 简单认证和 HMAC-MD5 密文认证
+- 配置前预览
+- 配置后状态验证
+- 任务日志及风险等级
+- 幂等生成
+- 删除配置时的精确命令生成
 
-## 严重问题
+暂时不要加入：
 
-### 1、代码中内置了固定的 Fernet 加密密钥
+- Stub、NSSA
+- 路由引入
+- 路由聚合
+- Filter-policy
+- Virtual Link
+- OSPFv3
+- 多进程重分发
 
-位置：`src/minince/config.py`
+这些功能应在基础模型稳定后逐步增加。
 
-```
-encryption_key: str = "IGCMr1nmWE42wXtTzSpoBRVnyK0_EqkhrZuTCfuNcoo="
-
-```
-
-这是目前最严重的问题。仓库公开后，任何使用默认配置保存的设备密码，都可以被知道该默认密钥的人解密。Fernet 是对称加密，密钥一旦公开，加密数据就不再具有保密性。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/config.py "MiniNce/src/minince/config.py at master · aInPers/MiniNce · GitHub"))
-
-建议：
-
-```
-encryption_key: str
-
-```
-
-启动时强制检查：
-
-```
-from pydantic import field_validator
-
-@field_validator("encryption_key")
-@classmethod
-def validate_encryption_key(cls, value: str) -> str:
-    if not value:
-        raise ValueError("ENCRYPTION_KEY must be configured")
-
-    if value == "IGCMr1nmWE42wXtTzSpoBRVnyK0_EqkhrZuTCfuNcoo=":
-        raise ValueError("Default encryption key must not be used")
-
-    return value
+## 推荐目录调整
 
 ```
-
-同时应立即：
-
-1. 删除代码中的默认密钥。
-2. 轮换已经使用过该密钥的所有设备密码。
-3. 重新生成数据库中的密码密文。
-4. 确保 `.env` 不进入 Git。
-5. 后续为密钥增加 `key_version`，为密钥轮换预留能力。
-
-***
-
-### 2、SSH 默认接受任意主机密钥，存在中间人攻击风险
-
-Paramiko 实现使用：
-
-```
-self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+src/minince/
+├── domain/network/
+│   ├── intents.py
+│   ├── config_plan.py
+│   └── ospf/
+│       ├── __init__.py
+│       ├── models.py
+│       ├── intents.py
+│       ├── validators.py
+│       └── state.py
+├── application/services/
+│   ├── ospf_plan_service.py
+│   └── ospf_verification_service.py
+├── infrastructure/drivers/huawei_vrp/
+│   ├── ospf_renderer.py
+│   ├── ospf_parser.py
+│   └── ospf_verifier.py
+└── web/
+    ├── api/
+    │   └── ospf.py
+    └── templates/
+        └── ospf/
 
 ```
 
-Netmiko 实现也传入：
+不要把 OSPF 的所有逻辑继续堆进 `intents.py` 或华为主驱动文件。当前仓库已经把领域层、应用层和驱动层分开，OSPF 也应保持相同分层。([GitHub](https://github.com/aInPers/MiniNce/tree/master/src/minince "MiniNce/src/minince at master · aInPers/MiniNce · GitHub"))
+
+## 核心领域模型
+
+建议使用设备无关模型：
 
 ```
-auto_add_host=True
+from enum import StrEnum
+from ipaddress import IPv4Address, IPv4Network
+from pydantic import BaseModel, Field, field_validator
 
-```
 
-这意味着首次连接时，平台不会验证设备身份，而是自动信任返回的 SSH 主机密钥。攻击者只要能够劫持网络流量，就可能伪装成网络设备，获取设备用户名、密码及待下发配置。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/infrastructure/ssh/paramiko_connection.py "MiniNce/src/minince/infrastructure/ssh/paramiko_connection.py at master · aInPers/MiniNce · GitHub"))
+class OspfOperation(StrEnum):
+    ENSURE_PRESENT = "ensure_present"
+    ENSURE_ABSENT = "ensure_absent"
 
-网络自动化平台不应默认使用 TOFU 自动信任。
 
-建议将主机密钥验证设计为设备资产的一部分：
+class OspfNetworkType(StrEnum):
+    BROADCAST = "broadcast"
+    P2P = "p2p"
+    NBMA = "nbma"
+    P2MP = "p2mp"
 
-```
-Device
-├── ssh_host_key_algorithm
-├── ssh_host_key_fingerprint
-├── host_key_status
-└── host_key_verified_at
 
-```
+class OspfAuthType(StrEnum):
+    NONE = "none"
+    SIMPLE = "simple"
+    HMAC_MD5 = "hmac_md5"
 
-首次接入流程应为：
 
-```
-发现主机密钥
-→ 展示指纹
-→ 管理员确认
-→ 保存指纹
-→ 后续连接必须精确匹配
+class OspfNetworkIntent(BaseModel):
+    network: IPv4Network
+    area_id: IPv4Address
 
-```
 
-生产环境默认应使用：
+class OspfInterfaceIntent(BaseModel):
+    interface_name: str
+    area_id: IPv4Address
+    cost: int | None = Field(default=None, ge=1, le=65535)
+    network_type: OspfNetworkType | None = None
+    silent: bool = False
+    auth_type: OspfAuthType = OspfAuthType.NONE
+    auth_key_id: int | None = Field(default=None, ge=1, le=255)
+    auth_secret: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        repr=False,
+    )
 
-```
-paramiko.RejectPolicy()
 
-```
+class OspfProcessIntent(BaseModel):
+    operation: OspfOperation = OspfOperation.ENSURE_PRESENT
+    process_id: int = Field(ge=1, le=65535)
+    router_id: IPv4Address | None = None
+    networks: list[OspfNetworkIntent] = Field(default_factory=list)
+    interfaces: list[OspfInterfaceIntent] = Field(default_factory=list)
 
-只有明确开启“首次发现模式”时才允许获取未知指纹，而且不能直接执行配置。
-
-***
-
-### 3、配置默认开启 Debug 并监听所有地址
-
-当前配置是：
-
-```
-debug: bool = True
-host: str = "0.0.0.0"
-
-```
-
-这意味着用户未正确配置环境变量时，程序默认以调试模式暴露在所有网络接口上。对于保存网络设备凭据并具备配置下发能力的平台，这是危险的默认值。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/config.py "MiniNce/src/minince/config.py at master · aInPers/MiniNce · GitHub"))
-
-建议改为：
-
-```
-debug: bool = False
-host: str = "127.0.0.1"
-
-```
-
-并添加环境概念：
-
-```
-environment: Literal["development", "testing", "production"] = "production"
-
-```
-
-生产环境启动检查：
-
-```
-if settings.environment == "production" and settings.debug:
-    raise RuntimeError("Debug mode cannot be enabled in production")
+    @field_validator("interfaces")
+    @classmethod
+    def reject_duplicate_interfaces(
+        cls,
+        interfaces: list[OspfInterfaceIntent],
+    ) -> list[OspfInterfaceIntent]:
+        names = [item.interface_name.casefold() for item in interfaces]
+        if len(names) != len(set(names)):
+            raise ValueError("OSPF interface names must be unique")
+        return interfaces
 
 ```
 
-***
-
-## 高优先级问题
-
-### 4、风险确认可以通过 `created_by` 字符串绕过
-
-当前风险判断：
+认证密码不能写入普通任务日志、配置差异文本或异常信息。任务记录中只保存类似：
 
 ```
-if (
-    risk.requires_confirmation
-    and not confirmed
-    and not task.created_by.startswith("admin_")
-):
-    raise RiskBlockedError(...)
-
-```
-
-只要任务的 `created_by` 以 `admin_` 开头，高风险任务就不需要确认。身份和权限不应该通过一个可伪造的字符串前缀判断。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/application/services/task_executor.py "MiniNce/src/minince/application/services/task_executor.py at master · aInPers/MiniNce · GitHub"))
-
-例如以下用户名都会自动绕过：
-
-```
-admin_test
-admin_fake
-admin_anything
-
-```
-
-应该改成独立的授权模型：
-
-```
-User
-Role
-Permission
-TaskApproval
-
-```
-
-并且高风险确认应保存完整审批证据：
-
-```
-TaskApproval
-├── task_id
-├── approved_by_user_id
-├── approved_at
-├── task_revision
-├── plan_hash
-├── reason
-└── source_ip
-
-```
-
-特别要注意，审批必须绑定到**具体配置计划的哈希值**。任务内容变化后，原审批自动失效。
-
-***
-
-### 5、`force=True` 可以绕过任务状态机
-
-任务执行入口允许：
-
-```
-if task.status not in (DRAFT, FAILED):
-    if not force:
-        raise TaskStateError(...)
-
-```
-
-传入 `force=True` 后，处于 `RUNNING`、`VERIFYING` 甚至 `SUCCEEDED` 状态的任务也可能重新执行。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/application/services/task_executor.py "MiniNce/src/minince/application/services/task_executor.py at master · aInPers/MiniNce · GitHub"))
-
-这会产生：
-
-1. 同一个任务被重复下发。
-2. 两个请求并发操作同一设备。
-3. 已成功任务被再次执行。
-4. 状态记录与设备真实状态不一致。
-
-`force` 不应该完全跳过状态机。建议只允许明确的重试路径：
-
-```
-ALLOWED_EXECUTION_STATES = {
-    TaskStatus.DRAFT,
-    TaskStatus.FAILED,
+{
+  "auth_type": "hmac_md5",
+  "auth_key_id": 1,
+  "auth_secret_configured": true
 }
 
 ```
 
-如需重试，应创建新的 execution attempt：
+## 华为 VRP 命令映射
+
+进程与网段模式：
 
 ```
-Task
-└── TaskExecutionAttempt
-    ├── attempt_number
-    ├── status
-    ├── started_at
-    ├── finished_at
-    └── previous_attempt_id
-
-```
-
-而不是重用和覆盖同一次执行记录。
-
-***
-
-### 6、任务没有原子抢占机制，存在并发重复执行
-
-当前流程是：
-
-```
-读取任务
-→ 判断状态
-→ 更新为 VALIDATING
+system-view
+ospf 1 router-id 10.0.0.1
+area 0.0.0.0
+network 10.0.0.0 0.0.0.255
+quit
+quit
 
 ```
 
-状态判断和状态更新不是一个原子操作。两个请求可能同时读到 `DRAFT`，然后都开始执行。相关代码先通过仓储查询任务，之后才进行状态转换。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/application/services/task_executor.py "MiniNce/src/minince/application/services/task_executor.py at master · aInPers/MiniNce · GitHub"))
-
-建议实现条件更新：
+接口方式：
 
 ```
-UPDATE tasks
-SET status = 'VALIDATING',
-    version = version + 1
-WHERE id = :task_id
-  AND status IN ('DRAFT', 'FAILED')
-  AND version = :expected_version;
+system-view
+interface GigabitEthernet0/0/1
+ospf enable 1 area 0.0.0.0
+ospf cost 10
+ospf network-type p2p
+quit
 
 ```
 
-受影响行数必须为 1，否则代表任务已被其他执行器抢占。
-
-数据库层建议增加：
+静默接口：
 
 ```
-version
-execution_token
-locked_at
-locked_by
+ospf 1
+silent-interface GigabitEthernet0/0/2
 
 ```
 
-此外，还需要设备级互斥锁，避免两个不同任务同时配置同一设备。
-
-***
-
-### 7、任务预览会泄漏 SSH 连接
-
-`preview_task()` 创建驱动并读取设备状态，但没有 `try/finally`，也没有调用 `driver.disconnect()`。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/application/services/task_executor.py "MiniNce/src/minince/application/services/task_executor.py at master · aInPers/MiniNce · GitHub"))
-
-当前结构：
+删除时必须根据意图精确生成，例如：
 
 ```
-driver = self._create_driver(device)
-current_state = driver.get_current_state(intent)
-plan = driver.build_plan(intent, current_state)
-return plan
+ospf 1
+area 0.0.0.0
+undo network 10.0.0.0 0.0.0.255
 
 ```
 
-频繁点击预览后可能积累 SSH 会话，最终导致设备 VTY 连接数耗尽。
-
-应该改为：
+或者：
 
 ```
-driver = self._create_driver(device)
-
-try:
-    current_state = driver.get_current_state(intent)
-    return driver.build_plan(intent, current_state)
-finally:
-    driver.disconnect()
+interface GigabitEthernet0/0/1
+undo ospf enable
+undo ospf cost
+undo ospf network-type
 
 ```
 
-最好让设备驱动本身支持上下文管理器：
+不能默认通过 `undo ospf 1` 删除整个进程，除非用户明确请求删除进程并通过高风险确认。
+
+## 幂等流程
+
+执行器不应该直接渲染目标配置，而应执行：
 
 ```
-with self._create_driver(device) as driver:
-    current_state = driver.get_current_state(intent)
-    return driver.build_plan(intent, current_state)
-
-```
-
-***
-
-### 8、连接测试创建的驱动无法由外层清理
-
-执行任务时先调用：
-
-```
-connection_result = self._test_connection(device)
-
-```
-
-而 `_test_connection()` 内部重新创建了一个局部驱动：
-
-```
-driver = self._create_driver(device)
-return driver.test_connection()
-
-```
-
-执行器外部的 `finally` 只能断开后来赋值给外层变量的另一个驱动，无法保证这里创建的测试驱动被释放。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/application/services/task_executor.py "MiniNce/src/minince/application/services/task_executor.py at master · aInPers/MiniNce · GitHub"))
-
-建议不要为测试和执行创建两套连接：
-
-```
-driver = self._create_driver(device)
-
-try:
-    connection_result = driver.test_connection()
-    current_state = driver.get_current_state(intent)
-    ...
-finally:
-    driver.disconnect()
+用户意图
+  ↓
+读取设备当前 OSPF 状态
+  ↓
+标准化当前状态
+  ↓
+比较期望状态与当前状态
+  ↓
+生成 ConfigPlan
+  ↓
+风险检查
+  ↓
+命令预览
+  ↓
+执行
+  ↓
+重新读取状态
+  ↓
+验证
 
 ```
 
-这样也能减少一次 SSH 登录，提高执行效率。
-
-***
-
-### 9、异常处理中的状态判断写错
-
-当前代码：
+建议配置计划保存：
 
 ```
-if task and task.status not in TaskStatus.FAILED.value:
-    self._transition(task_id, TaskStatus.FAILED.value)
-
-```
-
-这里右侧 `TaskStatus.FAILED.value` 是字符串，`in` 执行的是字符串成员判断，而不是状态相等判断。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/application/services/task_executor.py "MiniNce/src/minince/application/services/task_executor.py at master · aInPers/MiniNce · GitHub"))
-
-应该写成：
-
-```
-if task and task.status != TaskStatus.FAILED.value:
+class OspfConfigPlan(BaseModel):
+    process_id: int
+    commands: list[str]
+    verification_commands: list[str]
+    changed_fields: list[str]
+    risk_level: str
+    requires_confirmation: bool
+    expected_state: dict
+    rollback_commands: list[str]
 
 ```
 
-当前代码在某些异常状态下会产生不符合预期的判断，也会降低代码可读性。
+注意，第一版的 `rollback_commands` 只能用于本次明确新增或修改的配置，不要声称它已经实现完整精确回滚。
 
-***
+## 状态读取与验证
 
-## 中优先级问题
-
-### 10、自动对所有 Y/N 提示回答 `y`
-
-Paramiko 的读取逻辑发现任意以下提示时：
+至少执行：
 
 ```
-if "(y/n)" in lower_out or "[y/n]" in lower_out or "[y]:" in lower_out:
-    self._shell.send("y\n")
+display ospf brief
+display ospf peer
+display ospf interface
+display current-configuration configuration ospf
 
 ```
 
-会无条件自动确认。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/infrastructure/ssh/paramiko_connection.py "MiniNce/src/minince/infrastructure/ssh/paramiko_connection.py at master · aInPers/MiniNce · GitHub"))
+验证分为三层：
 
-这对网络设备配置非常危险。不同命令中的确认可能代表：
+1. 配置存在性：进程、Area、网段和接口命令是否存在。
+2. 运行状态：进程是否启动、接口是否进入预期 Area。
+3. 邻居状态：仅当用户要求验证邻居时，检查邻居是否达到 Full；没有配置对端时，不应把“无邻居”直接判为失败。
 
-- 删除配置。
-- 覆盖现有文件。
-- 重启设备。
-- 中断业务。
-- 恢复配置。
-- 清除接口或协议状态。
-
-连接层不应该替业务层做决策。
-
-建议将交互处理改成显式声明：
+验证结果建议：
 
 ```
-InteractionRule(
-    pattern=r"Continue\? \[Y/N\]",
-    response="Y",
-    allowed_commands={"save"},
-)
+class OspfVerificationResult(BaseModel):
+    configuration_valid: bool
+    process_running: bool
+    interfaces_valid: bool
+    neighbors_expected: bool
+    neighbors_full: bool | None
+    warnings: list[str]
+    evidence: dict[str, str]
 
 ```
 
-对于未知确认提示，必须停止任务并返回：
+## 风险控制
+
+风险等级建议：
+
+- 新增 OSPF 进程：中风险
+- 新增 Network 或接口启用：中风险
+- 修改 Cost、Network Type：中风险
+- 修改认证：高风险
+- 删除 Network：高风险
+- 删除进程：高风险
+- Router ID 变更：高风险，提示可能导致 OSPF 进程重启或邻接变化
+
+以下情况必须阻止执行：
+
+- Area ID 非法
+- 网段重叠且归属不同 Area
+- 同一接口重复配置不同 Area
+- 认证类型与必要参数不匹配
+- 用户输入原始换行符或命令分隔符
+- 接口名称不符合允许格式
+- 删除整个进程但未明确确认
+
+## API 设计
 
 ```
-WAITING_CONFIRMATION
-
-```
-
-而不是默认回答 `y`。
-
-***
-
-### 11、Netmiko 默认设备类型与项目目标不符
-
-设备类型未指定时，代码返回：
-
-```
-return "hp_comware"
-
-```
-
-但当前项目第一阶段目标是华为 VRP。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/infrastructure/ssh/netmiko_connection.py "MiniNce/src/minince/infrastructure/ssh/netmiko_connection.py at master · aInPers/MiniNce · GitHub"))
-
-Netmiko 中华为 VRP 通常应使用项目明确支持的华为设备类型，而不是静默回退到 HPE Comware。错误的平台类型可能导致：
-
-- 提示符识别失败。
-- 配置模式进入方式错误。
-- 保存命令错误。
-- 输出解析错误。
-
-建议由厂商驱动负责提供连接参数：
-
-```
-class HuaweiVRPDriver:
-    netmiko_device_type = "huawei"
+POST /api/v1/devices/{device_id}/ospf/preview
+POST /api/v1/devices/{device_id}/ospf/tasks
+GET  /api/v1/devices/{device_id}/ospf/state
+GET  /api/v1/tasks/{task_id}/ospf/verification
 
 ```
 
-无法识别时直接报错，不要猜测：
+示例请求：
 
 ```
-raise UnsupportedDeviceTypeError(...)
-
-```
-
-***
-
-### 12、命令分类使用字符串包含判断，容易误判
-
-Netmiko 实现通过以下方式决定使用哪个发送方法：
-
-```
-if "display" in command.lower() or "show" in command.lower():
-    return send_command(...)
-else:
-    return send_command_timing(...)
-
-```
-
-这不是可靠的命令语义判断。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/infrastructure/ssh/netmiko_connection.py "MiniNce/src/minince/infrastructure/ssh/netmiko_connection.py at master · aInPers/MiniNce · GitHub"))
-
-例如包含 `display` 字样的配置内容可能被当成查询命令；不以 `display` 开头的查询命令也可能进入 timing 模式。
-
-建议 SSH 层不要解析命令语义，而是由调用方明确指定：
-
-```
-connection.execute_operational(command)
-connection.execute_interactive(command)
-connection.execute_config(commands)
+{
+  "process_id": 1,
+  "router_id": "10.255.0.1",
+  "networks": [
+    {
+      "network": "10.10.10.0/24",
+      "area_id": "0.0.0.0"
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_name": "GigabitEthernet0/0/1",
+      "area_id": "0.0.0.0",
+      "cost": 10,
+      "network_type": "p2p",
+      "silent": false,
+      "auth_type": "none"
+    }
+  ]
+}
 
 ```
 
-***
-
-### 13、步骤记录不是更新同一步骤，而是不断创建新记录
-
-`_record_step()` 每次都会先调用：
+## 必须添加的测试
 
 ```
-step = self._task_repo.create_step(...)
+tests/domain/network/ospf/
+├── test_models.py
+├── test_validators.py
+└── test_state_diff.py
 
-```
+tests/infrastructure/drivers/huawei_vrp/
+├── test_ospf_renderer.py
+├── test_ospf_parser.py
+└── test_ospf_verifier.py
 
-之后如存在输出，再更新刚创建的步骤。执行器分别用 `RUNNING` 和 `SUCCEEDED` 调用它，因此同一个逻辑步骤会产生两条记录，而不是一条记录从 RUNNING 更新为 SUCCEEDED。([GitHub](https://github.com/aInPers/MiniNce/blob/master/src/minince/application/services/task_executor.py "MiniNce/src/minince/application/services/task_executor.py at master · aInPers/MiniNce · GitHub"))
-
-这会导致：
-
-```
-validate_device RUNNING
-validate_device SUCCEEDED
+tests/application/
+├── test_ospf_plan_service.py
+└── test_ospf_task_execution.py
 
 ```
 
-而不是：
+重点覆盖：
 
-```
-validate_device: RUNNING → SUCCEEDED
+- 相同状态不生成命令
+- 新增网段只生成新增命令
+- 删除单个网段不删除进程
+- Router ID 变更标记高风险
+- 明文认证密码不出现在日志
+- 密文认证缺少 Key ID 时拒绝
+- 相同接口配置不同 Area 时拒绝
+- 无邻居预期时不会误判失败
+- 命令执行失败后任务状态正确
+- Mock SSH 下完整生命周期可运行
 
-```
+当前最合理的开发顺序是：**领域模型 → 华为命令渲染 → 状态解析 → 差异计划 → 验证器 → API → Web 页面**。仓库 README 显示已有配置预览、差异计算、任务生命周期、结果验证和 Mock SSH，因此 OSPF 应复用这些机制，而不是重新实现一套执行系统。([GitHub](https://github.com/aInPers/MiniNce "GitHub - aInPers/MiniNce · GitHub"))
 
-建议执行时保留 `step_id`：
-
-```
-step = start_step(...)
-try:
-    ...
-    finish_step(step.id, SUCCEEDED)
-except Exception:
-    finish_step(step.id, FAILED)
-
-```
-
-同时增加：
-
-```
-started_at
-finished_at
-duration_ms
-sequence
-attempt_id
-
-```
-
-***
-
-## 架构评价
-
-当前代码已经有不错的架构雏形：
-
-- 领域、应用、基础设施和 Web 层已分开。
-- SSH 使用抽象接口，并提供 Mock、Paramiko 和 Netmiko 实现。
-- 设备驱动与业务执行器基本分离。
-- 具备任务状态、执行步骤和审计日志。
-- 配置生成前会先读取状态并构建计划，已有幂等性思路。([GitHub](https://github.com/aInPers/MiniNce "GitHub - aInPers/MiniNce · GitHub"))
-
-但现在的实现仍偏向“单进程原型”。要达到 MiniNCE 所要求的自动下发、防误操作、状态管理和全流程可追踪，需要优先补上：
-
-```
-设备级锁
-任务原子抢占
-审批记录
-计划哈希
-执行尝试记录
-主机密钥验证
-事务边界
-连接生命周期
-密钥轮换
-不可变审计日志
-
-```
-
-## 建议修复顺序
-
-1. 删除默认加密密钥并轮换凭据。
-2. 禁止自动接受 SSH 主机密钥。
-3. 修复高风险确认绕过机制。
-4. 增加任务原子抢占和设备级锁。
-5. 修复预览、测试连接的 SSH 会话泄漏。
-6. 删除或限制 `force` 状态绕过。
-7. 禁止自动回答未知 Y/N 提示。
-8. 修复状态字符串判断和 Netmiko 设备类型。
-9. 重构任务步骤为真正的生命周期记录。
-10. 最后再扩展 VLAN、接口之外的高级功能。
-
-**当前评价：架构方向良好，但尚不适合连接生产网络设备。** 在上述前三项安全问题修复之前，建议只用于 eNSP 或隔离测试环境。
+要让我直接修改并交付可运行代码，需要把仓库 ZIP 上传到当前对话，或提供可写的 GitHub/Codex 工作区；当前公开链接本身不授予代码写入能力。

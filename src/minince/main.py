@@ -11,10 +11,9 @@ from minince.web.routers.api import router as api_router
 from minince.web.routers.backups import router as backups_router
 from minince.web.routers.canvas import router as canvas_router
 from minince.web.routers.devices import router as devices_router
+from minince.web.routers.manual_config import router as manual_config_router
 from minince.web.routers.ospf import router as ospf_router
 from minince.web.routers.pages import router as pages_router
-from minince.web.routers.tasks import router as tasks_router
-from minince.web.routers.templates import router as templates_router
 
 
 def create_app() -> FastAPI:
@@ -39,8 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router)
     app.include_router(devices_router)
     app.include_router(canvas_router)
-    app.include_router(tasks_router)
-    app.include_router(templates_router)
+    app.include_router(manual_config_router)
     app.include_router(backups_router)
     app.include_router(ospf_router)
 

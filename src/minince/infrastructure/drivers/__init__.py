@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from minince.domain.devices.driver import NetworkDeviceDriver
+from minince.domain.devices.network_device import NetworkDevice
 from minince.shared.exceptions import DeviceConnectionError
 
-_DRIVER_REGISTRY: dict[str, type[NetworkDeviceDriver]] = {}
+_DRIVER_REGISTRY: dict[str, type[NetworkDevice]] = {}
 
 
-def register_driver(vendor: str, driver_class: type[NetworkDeviceDriver]) -> None:
+def register_driver(vendor: str, driver_class: type[NetworkDevice]) -> None:
     _DRIVER_REGISTRY[vendor] = driver_class
 
 
-def get_driver(vendor: str, **kwargs: Any) -> NetworkDeviceDriver:
+def get_driver(vendor: str, **kwargs: Any) -> NetworkDevice:
     driver_class = _DRIVER_REGISTRY.get(vendor)
     if driver_class is None:
         raise DeviceConnectionError(
@@ -29,8 +29,8 @@ def list_registered_drivers() -> list[str]:
 def _ensure_drivers_loaded() -> None:
     if _DRIVER_REGISTRY:
         return
-    from minince.infrastructure.drivers.huawei_vrp.driver import HuaweiVRPDriver
-    register_driver("HUAWEI", HuaweiVRPDriver)  # type: ignore[type-abstract]
+    from minince.infrastructure.drivers.huawei_vrp.huawei_device import HuaweiDevice
+    register_driver("HUAWEI", HuaweiDevice)
 
 
 _ensure_drivers_loaded()

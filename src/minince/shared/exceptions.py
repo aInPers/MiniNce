@@ -47,62 +47,9 @@ class DeviceNotFoundError(MiniNCEError):
         )
 
 
-class TaskNotFoundError(MiniNCEError):
-    def __init__(self, task_id: int | str) -> None:
-        super().__init__(
-            f"Task not found: {task_id}",
-            code="TASK_NOT_FOUND",
-            details={"task_id": task_id},
-        )
-
-
-class TaskStateError(MiniNCEError):
-    def __init__(self, message: str, current_state: str, expected_state: str | None = None) -> None:
-        super().__init__(
-            message,
-            code="TASK_STATE_ERROR",
-            details={
-                "current_state": current_state,
-                "expected_state": expected_state,
-            },
-        )
-
-
-class TaskExecutionError(MiniNCEError):
-    def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
-        super().__init__(message, code="TASK_EXECUTION_ERROR", details=details)
-
-
-class TemplateNotFoundError(MiniNCEError):
-    def __init__(self, template_id: int | str) -> None:
-        super().__init__(
-            f"Template not found: {template_id}",
-            code="TEMPLATE_NOT_FOUND",
-            details={"template_id": template_id},
-        )
-
-
-class TemplateRenderError(MiniNCEError):
-    def __init__(self, message: str, template_name: str) -> None:
-        super().__init__(
-            message,
-            code="TEMPLATE_RENDER_ERROR",
-            details={"template_name": template_name},
-        )
-
-
 class EncryptionError(MiniNCEError):
     def __init__(self, message: str) -> None:
         super().__init__(message, code="ENCRYPTION_ERROR")
-
-
-class RiskBlockedError(MiniNCEError):
-    def __init__(self, message: str, risk_level: str) -> None:
-        super().__init__(
-            message,
-            code="RISK_BLOCKED",
-            details={"risk_level": risk_level},
-        )
 
 
 class ConfigurationError(MiniNCEError):

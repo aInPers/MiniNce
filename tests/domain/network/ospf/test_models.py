@@ -133,7 +133,9 @@ class TestOspfProcessIntent:
                 )
             ],
         )
-        structured = intent.to_structured_intent(auth_secret_encrypted="ENC_TOKEN")
+        structured = intent.to_structured_intent(
+            auth_secrets_encrypted={"GigabitEthernet0/0/1": "ENC_TOKEN"}
+        )
         blob = repr(structured)
         assert "supersecret" not in blob
         assert "ENC_TOKEN" in blob  # 密文存在
